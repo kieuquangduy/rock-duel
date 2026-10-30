@@ -10,6 +10,7 @@ export default function App() {
   const containerRef = useRef(null);
   const engineRef = useRef(null);
   const networkRef = useRef(null);
+  const handshakeInterval = useRef(null);
 
   // UI & Match states
   const [inGame, setInGame] = useState(false);
@@ -24,7 +25,7 @@ export default function App() {
   const [muted, setMuted] = useState(false);
 
   // Round victory/defeat notification
-  const [roundStatus, setRoundStatus] = useState(null); // 'WIN' | 'LOSS' | null
+  const [roundStatus, setRoundStatus] = useState(null);
   const [roundMessage, setRoundMessage] = useState('');
 
   // Multiplayer Lobby states
@@ -65,8 +66,16 @@ export default function App() {
     return () => clearInterval(interval);
   }, [inGame, isBotMode]);
 
+  const clearHandshake = () => {
+    if (handshakeInterval.current) {
+      clearInterval(handshakeInterval.current);
+      handshakeInterval.current = null;
+    }
+  };
+
   // Launch the 3D Game Engine
   const startGame = (botMode = true, distance = mapDistance) => {
+    clearHandshake();
     setIsBotMode(botMode);
     setInGame(true);
     setScores({ player: 0, opponent: 0 });
@@ -109,6 +118,7 @@ export default function App() {
 
   // Exit Match and return to Lobby
   const handleExitMatch = () => {
+    clearHandshake();
     if (engineRef.current) {
       engineRef.current.destroy();
       engineRef.current = null;
@@ -181,7 +191,12 @@ export default function App() {
     const net = new MultiplayerManager({
       onStatus: (msg) => setNetworkStatus(msg),
       onConnected: () => {
-        net.send({ type: 'START_GAME', distance: mapDistance });
+        // Host sends START_GAME periodically every 300ms until match starts
+        clearHandshake();
+        handshakeInterval.current = setInterval(() => {
+          net.send({ type: 'START_GAME', distance: mapDistance });
+        }, 300);
+
         startGame(false, mapDistance);
       },
       onDisconnected: () => {
@@ -215,7 +230,11 @@ export default function App() {
     const net = new MultiplayerManager({
       onStatus: (msg) => setNetworkStatus(msg),
       onConnected: () => {
-        setNetworkStatus('Đã kết nối! Đang đồng bộ vào trận...');
+        // Client sends CLIENT_HELLO every 300ms until START_GAME arrives
+        clearHandshake();
+        handshakeInterval.current = setInterval(() => {
+          net.send({ type: 'CLIENT_HELLO' });
+        }, 300);
       },
       onDisconnected: () => {
         setNetworkError('Mất kết nối với chủ phòng!');
@@ -240,6 +259,15 @@ export default function App() {
     }
   };
 
+  // Manual Force Start button if user doesn't want to wait
+  const handleForceStart = () => {
+    clearHandshake();
+    if (networkRef.current) {
+      networkRef.current.send({ type: 'START_GAME', distance: mapDistance });
+    }
+    startGame(false, mapDistance);
+  };
+
   const handleNetworkData = (data) => {
     if (!data) return;
 
@@ -254,14 +282,18 @@ export default function App() {
         break;
 
       case 'START_GAME':
-        setMapDistance(data.distance);
-        startGame(false, data.distance);
+        clearHandshake();
         if (networkRef.current) {
           networkRef.current.send({ type: 'START_ACK' });
+        }
+        setMapDistance(data.distance);
+        if (!inGame) {
+          startGame(false, data.distance);
         }
         break;
 
       case 'START_ACK':
+        clearHandshake();
         if (!inGame) {
           startGame(false, mapDistance);
         }
@@ -332,6 +364,7 @@ export default function App() {
           onStartSolo={() => startGame(true, mapDistance)}
           onCreateRoom={handleCreateRoom}
           onJoinRoom={handleJoinRoom}
+          onForceStart={handleForceStart}
           selectedMap={mapDistance}
           onSelectMap={(dist) => {
             setMapDistance(dist);

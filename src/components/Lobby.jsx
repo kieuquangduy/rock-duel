@@ -1,10 +1,11 @@
 import React, { useState } from 'react';
-import { Play, Users, Bot, Copy, Check, Target, Compass, Shield } from 'lucide-react';
+import { Play, Users, Bot, Copy, Check, Target, Compass, Shield, Zap } from 'lucide-react';
 
 export function Lobby({
   onStartSolo,
   onCreateRoom,
   onJoinRoom,
+  onForceStart,
   selectedMap,
   onSelectMap,
   roomId,
@@ -45,6 +46,8 @@ export function Lobby({
     setTimeout(() => setCopied(false), 2000);
   };
 
+  const isPeerDetected = networkStatus.includes('Phát hiện') || networkStatus.includes('kết nối') || networkStatus.includes('thành công');
+
   return (
     <div className="fixed inset-0 bg-stone-950/90 backdrop-blur-md flex items-center justify-center p-4 z-50">
       <div className="w-full max-w-xl bg-stone-900 border border-stone-800 rounded-3xl p-6 sm:p-8 shadow-2xl flex flex-col gap-6 text-stone-200">
@@ -61,7 +64,7 @@ export function Lobby({
           </p>
         </div>
 
-        {/* Tab selection: Online vs Bot */}
+        {/* Tab selection */}
         <div className="grid grid-cols-2 p-1 bg-stone-950/80 rounded-2xl border border-stone-800 text-sm font-semibold">
           <button
             onClick={() => setActiveTab('online')}
@@ -141,7 +144,7 @@ export function Lobby({
                   </div>
                   <div className="flex items-center gap-2">
                     <span className="w-2.5 h-2.5 rounded-full bg-amber-400 animate-ping" />
-                    <span className="text-xs text-stone-400 font-medium">
+                    <span className="text-xs text-amber-300 font-medium">
                       {networkStatus || 'Đang đợi bạn kết nối...'}
                     </span>
                   </div>
@@ -154,6 +157,16 @@ export function Lobby({
                   {copied ? <Check size={16} className="text-emerald-400" /> : <Copy size={16} />}
                   {copied ? 'Đã sao chép link mời!' : 'Sao chép link gửi cho bạn bè'}
                 </button>
+
+                {/* Instant Force Start Button if handshaking takes more than 1 second */}
+                {isPeerDetected && (
+                  <button
+                    onClick={onForceStart}
+                    className="w-full py-3 px-4 bg-emerald-500 hover:bg-emerald-400 text-stone-950 text-xs font-black uppercase tracking-wider rounded-xl flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/20 transition-all animate-bounce mt-1"
+                  >
+                    <Zap size={16} fill="currentColor" /> Vào Trận Ngay Lập Tức
+                  </button>
+                )}
               </div>
             )}
 

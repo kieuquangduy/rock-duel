@@ -12,10 +12,8 @@ export class MultiplayerManager {
     this.conn = null;
     this.isHost = false;
     this.roomId = null;
-    this.handshakeInterval = null;
   }
 
-  // Generate a clean lowercase 6-character room code (e.g. duel4k8b)
   generateRoomId() {
     const chars = 'abcdefghjkmnpqrstuvwxyz23456789';
     let code = 'duel';
@@ -25,40 +23,55 @@ export class MultiplayerManager {
     return code;
   }
 
+  // Full STUN + Free Public TURN Relay for 100% NAT/CGNAT Traversal
   getIceConfig() {
     return {
       iceServers: [
         { urls: 'stun:stun.l.google.com:19302' },
         { urls: 'stun:stun1.l.google.com:19302' },
         { urls: 'stun:stun2.l.google.com:19302' },
-        { urls: 'stun:stun3.l.google.com:19302' },
-        { urls: 'stun:stun.cloudflare.com:3478' }
-      ]
+        { urls: 'stun:stun.cloudflare.com:3478' },
+        // OpenRelay Project Free TURN Servers (Traverses 4G, Mobile, CGNAT)
+        {
+          urls: 'turn:openrelay.metered.ca:80',
+          username: 'openrelayproject',
+          credential: 'openrelayproject',
+        },
+        {
+          urls: 'turn:openrelay.metered.ca:443',
+          username: 'openrelayproject',
+          credential: 'openrelayproject',
+        },
+        {
+          urls: 'turn:openrelay.metered.ca:443?transport=tcp',
+          username: 'openrelayproject',
+          credential: 'openrelayproject',
+        },
+      ],
     };
   }
 
-  // Create Room as Host
   createRoom(customRoomId = null) {
     this.isHost = true;
     this.roomId = (customRoomId || this.generateRoomId()).toLowerCase().trim();
 
     return new Promise((resolve, reject) => {
       try {
-        this.onStatus('Đang đăng ký phòng với máy chủ...');
+        this.onStatus('Đang đăng ký phòng...');
         this.peer = new Peer(this.roomId, {
           debug: 1,
-          config: this.getIceConfig()
+          config: this.getIceConfig(),
         });
 
         this.peer.on('open', (id) => {
           this.roomId = id;
-          this.onStatus('Phòng sẵn sàng. Đang đợi bạn bè kết nối...');
+          this.onStatus('Phòng sẵn sàng. Đang chờ bạn bè kết nối...');
           resolve(id);
         });
 
         this.peer.on('connection', (connection) => {
           this.conn = connection;
-          this.onStatus('Phát hiện kết nối từ bạn bè! Đang bắt tay...');
+          this.onStatus('Phát hiện bạn bè! Đang vào trận ngay...');
           this.setupConnection();
         });
 
@@ -77,24 +90,22 @@ export class MultiplayerManager {
     });
   }
 
-  // Join Room as Client
   joinRoom(targetRoomId) {
     this.isHost = false;
     this.roomId = targetRoomId.toLowerCase().trim();
 
     return new Promise((resolve, reject) => {
       try {
-        this.onStatus('Đang khởi tạo kết nối P2P...');
+        this.onStatus('Đang kết nối tới phòng...');
         this.peer = new Peer({
           debug: 1,
-          config: this.getIceConfig()
+          config: this.getIceConfig(),
         });
 
         this.peer.on('open', () => {
-          this.onStatus(`Đang kết nối vào phòng ${this.roomId}...`);
-          this.conn = this.peer.connect(this.roomId, {
-            reliable: true,
-          });
+          this.onStatus(`Đang vào phòng ${this.roomId}...`);
+          // Note: DO NOT pass { reliable: true } which is deprecated and causes stalls!
+          this.conn = this.peer.connect(this.roomId);
           this.setupConnection();
           resolve(this.roomId);
         });
@@ -117,50 +128,40 @@ export class MultiplayerManager {
     const handleConnected = () => {
       if (hasConnected) return;
       hasConnected = true;
-      this.onStatus('Kết nối thành công! Đang vào trận...');
+      this.onStatus('Kết nối thành công! Đang vào game...');
       this.onConnected({ isHost: this.isHost, roomId: this.roomId });
-
-      // If client, start periodic handshake ping until host responds with START_GAME
-      if (!this.isHost) {
-        this.send({ type: 'CLIENT_HELLO' });
-        this.handshakeInterval = setInterval(() => {
-          this.send({ type: 'CLIENT_HELLO' });
-        }, 400);
-      }
     };
 
-    // Check if data channel is already open or wait for 'open' event
+    // If channel is already open
     if (this.conn.open) {
       handleConnected();
     } else {
       this.conn.on('open', handleConnected);
     }
 
+    // Direct RTCPeerConnection monitoring in case 'open' event is delayed
+    if (this.conn.peerConnection) {
+      this.conn.peerConnection.addEventListener('iceconnectionstatechange', () => {
+        const state = this.conn?.peerConnection?.iceConnectionState;
+        if (state === 'connected' || state === 'completed') {
+          handleConnected();
+        }
+      });
+    }
+
+    // Receiving any data proves connection is live!
     this.conn.on('data', (data) => {
-      // Clear client handshake interval when host responds
-      if (this.handshakeInterval && (data.type === 'START_GAME' || data.type === 'HOST_READY')) {
-        clearInterval(this.handshakeInterval);
-        this.handshakeInterval = null;
-      }
+      handleConnected();
       this.onData(data);
     });
 
     this.conn.on('close', () => {
-      this.stopHandshake();
       this.onDisconnected();
     });
 
     this.conn.on('error', (err) => {
-      this.stopHandshake();
       this.onError(err);
     });
-  }
-
-  stopHandshake() {
-    if (this.handshakeInterval) {
-      clearInterval(this.handshakeInterval);
-      this.handshakeInterval = null;
-    }
   }
 
   send(data) {
@@ -168,19 +169,22 @@ export class MultiplayerManager {
       try {
         this.conn.send(data);
       } catch (e) {
-        console.error('Error sending data:', e);
+        console.error('Send error:', e);
       }
     }
   }
 
   destroy() {
-    this.stopHandshake();
     if (this.conn) {
-      this.conn.close();
+      try {
+        this.conn.close();
+      } catch (e) {}
       this.conn = null;
     }
     if (this.peer) {
-      this.peer.destroy();
+      try {
+        this.peer.destroy();
+      } catch (e) {}
       this.peer = null;
     }
   }
