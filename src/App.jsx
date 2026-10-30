@@ -20,6 +20,7 @@ export default function App() {
   // In-game real-time HUD states
   const [isAiming, setIsAiming] = useState(false);
   const [canShoot, setCanShoot] = useState(true);
+  const [isLocked, setIsLocked] = useState(false);
   const [muted, setMuted] = useState(false);
 
   // Round victory/defeat notification
@@ -82,6 +83,9 @@ export default function App() {
       engineRef.current = new GameEngine(containerRef.current, {
         mapDistance: distance,
         isBotMode: botMode,
+        onPointerLockChange: (locked) => {
+          setIsLocked(locked);
+        },
         onBoltState: (ready) => {
           setCanShoot(ready);
         },
@@ -115,6 +119,7 @@ export default function App() {
     }
     setInGame(false);
     setIsWaitingForPeer(false);
+    setIsLocked(false);
     setRoomId('');
     setNetworkStatus('');
     setNetworkError('');
@@ -176,7 +181,6 @@ export default function App() {
     const net = new MultiplayerManager({
       onStatus: (msg) => setNetworkStatus(msg),
       onConnected: () => {
-        // As host, when peer connects, broadcast START_GAME and enter immediately
         net.send({ type: 'START_GAME', distance: mapDistance });
         startGame(false, mapDistance);
       },
@@ -241,7 +245,6 @@ export default function App() {
 
     switch (data.type) {
       case 'CLIENT_HELLO':
-        // Host receives client greeting -> fire START_GAME
         if (networkRef.current?.isHost) {
           networkRef.current.send({ type: 'START_GAME', distance: mapDistance });
           if (!inGame) {
@@ -302,9 +305,9 @@ export default function App() {
   };
 
   return (
-    <div className="relative w-screen h-screen bg-stone-950 overflow-hidden cursor-crosshair">
+    <div className={`relative w-screen h-screen bg-stone-950 overflow-hidden ${inGame ? 'cursor-none' : ''}`}>
       {/* 3D WebGL Canvas */}
-      <div ref={containerRef} className="w-full h-full" />
+      <div ref={containerRef} className="w-full h-full cursor-none" />
 
       {/* In-Game Heads-Up Display */}
       {inGame && (
@@ -316,6 +319,7 @@ export default function App() {
           roundStatus={roundStatus}
           roundMessage={roundMessage}
           isBotMode={isBotMode}
+          isLocked={isLocked}
           muted={muted}
           onToggleMute={handleToggleMute}
           onExitMatch={handleExitMatch}

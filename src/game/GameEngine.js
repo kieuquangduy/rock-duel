@@ -10,6 +10,7 @@ export class GameEngine {
     this.onShotFired = options.onShotFired || (() => {});
     this.onCoverChange = options.onCoverChange || (() => {});
     this.onBoltState = options.onBoltState || (() => {});
+    this.onPointerLockChange = options.onPointerLockChange || (() => {});
 
     this.mapDistance = options.mapDistance || 35; // 18, 35, 60
     this.isBotMode = options.isBotMode ?? true;
@@ -20,6 +21,7 @@ export class GameEngine {
     this.isAiming = false;
     this.canShoot = true;
     this.isCovered = true;
+    this.isLocked = false;
 
     // Aim angles (Pitch & Yaw)
     this.aimYaw = 0;   // Radians (left/right)
@@ -46,10 +48,10 @@ export class GameEngine {
     // Bot AI state
     this.botState = {
       action: 'HIDE', // HIDE, PEEK
-      timer: 1.2,
-      targetPos: { x: 0, y: 0 },
+      timer: 1.5,
+      targetPos: { x: 0, y: -0.35 },
       aimDuration: 0,
-      reactionTime: 0.9,
+      reactionTime: 0.85,
     };
 
     this.initScene();
@@ -66,6 +68,7 @@ export class GameEngine {
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.15;
+    this.renderer.domElement.style.cursor = 'none';
     this.container.appendChild(this.renderer.domElement);
 
     // 2. Scene
@@ -80,7 +83,7 @@ export class GameEngine {
       0.1,
       400
     );
-    this.baseCamPos = new THREE.Vector3(0, 1.25, 0);
+    this.baseCamPos = new THREE.Vector3(0, 1.18, 0);
     this.camera.position.copy(this.baseCamPos);
 
     // 4. Lighting
@@ -97,18 +100,20 @@ export class GameEngine {
     // 5. Arena Environment
     this.environment = createDesertEnvironment(this.scene);
 
-    // 6. Player's Rock (Width 2.4m, Height 1.38m, placed at z = -1.25)
-    this.playerRock = createProceduralRock(2.4, 1.38, 1.8, 42);
-    this.playerRock.position.set(0, 0.65, -1.25);
+    // 6. Player's Rock (Width 2.4m, Height 1.4m, placed at z = -1.25)
+    this.playerRock = createProceduralRock(2.4, 1.4, 1.8, 42);
+    this.playerRock.position.set(0, 0.7, -1.25);
     this.scene.add(this.playerRock);
 
     // 7. Opponent's Rock & Opponent Avatar
-    this.opponentRock = createProceduralRock(2.4, 1.38, 1.8, 99);
-    this.opponentRock.position.set(0, 0.65, -this.mapDistance);
+    // Opponent rock is at -mapDistance
+    this.opponentRock = createProceduralRock(2.4, 1.4, 1.8, 99);
+    this.opponentRock.position.set(0, 0.7, -this.mapDistance);
     this.scene.add(this.opponentRock);
 
+    // CRITICAL: Opponent Avatar is placed BEHIND opponent's rock (further back at -mapDistance - 0.35m)
     this.opponent = createOpponentAvatar();
-    this.opponent.group.position.set(0, 0, -this.mapDistance + 0.3);
+    this.opponent.group.position.set(0, 0, -this.mapDistance - 0.35);
     this.scene.add(this.opponent.group);
 
     // 8. First-person Gun Model attached to camera
@@ -125,12 +130,53 @@ export class GameEngine {
   setMapDistance(distance) {
     this.mapDistance = distance;
     this.opponentRock.position.z = -this.mapDistance;
-    this.opponent.group.position.z = -this.mapDistance + 0.3;
+    this.opponent.group.position.z = -this.mapDistance - 0.35;
+  }
+
+  requestLock() {
+    if (this.renderer && this.renderer.domElement && !document.pointerLockElement) {
+      try {
+        this.renderer.domElement.requestPointerLock();
+      } catch (err) {
+        console.warn('Pointer lock request error:', err);
+      }
+    }
+  }
+
+  exitLock() {
+    if (document.pointerLockElement) {
+      document.exitPointerLock();
+    }
   }
 
   initListeners() {
+    // Click on canvas to lock mouse
+    this.onCanvasClick = () => {
+      sounds.init();
+      if (this.isAlive && !document.pointerLockElement) {
+        this.requestLock();
+      }
+    };
+
+    // Listen for pointer lock changes
+    this.onLockChange = () => {
+      this.isLocked = document.pointerLockElement === this.renderer.domElement;
+      this.onPointerLockChange(this.isLocked);
+    };
+
+    // Hotkey: Ctrl + Alt or Escape to unlock cursor
+    this.onKeyDown = (e) => {
+      if ((e.ctrlKey && e.altKey) || e.key === 'Escape') {
+        this.exitLock();
+      }
+    };
+
     this.onMouseMove = (e) => {
       if (!this.isAlive) return;
+
+      // Only control aim & lean when pointer lock is active!
+      // This guarantees no OS cursor is shown and no dual-cursor confusion exists.
+      if (!document.pointerLockElement) return;
 
       const deltaX = e.movementX || 0;
       const deltaY = e.movementY || 0;
@@ -141,21 +187,26 @@ export class GameEngine {
       this.aimYaw -= deltaX * sens;
       this.aimPitch -= deltaY * sens;
 
-      // Limit yaw & pitch range
+      // Clamp yaw and pitch
       this.aimYaw = THREE.MathUtils.clamp(this.aimYaw, -0.65, 0.65);
       this.aimPitch = THREE.MathUtils.clamp(this.aimPitch, -0.35, 0.45);
 
-      // Leaning / Peeking out around the boulder:
-      // When aiming left -> lean body left to clear the rock!
-      // When aiming right -> lean body right to clear the rock!
-      // When aiming up -> raise head above the rock!
-      // When aiming down / center -> duck safely behind the rock!
-      this.targetLean.x = this.aimYaw * 2.2;
-      this.targetLean.y = this.aimPitch * 1.4;
+      // Body lean directly tied to aim:
+      // Aiming left -> leans left out of cover
+      // Aiming right -> leans right out of cover
+      // Aiming up -> raises head above rock
+      // Aiming down / center -> ducked safely behind rock
+      this.targetLean.x = this.aimYaw * 2.3;
+      this.targetLean.y = this.aimPitch * 1.5;
     };
 
     this.onMouseDown = (e) => {
       sounds.init();
+
+      if (!document.pointerLockElement) {
+        this.requestLock();
+        return;
+      }
 
       // Right-click: Aim Down Sights (ADS)
       if (e.button === 2) {
@@ -186,11 +237,19 @@ export class GameEngine {
       this.renderer.setSize(width, height);
     };
 
+    this.container.addEventListener('click', this.onCanvasClick);
+    document.addEventListener('pointerlockchange', this.onLockChange);
+    window.addEventListener('keydown', this.onKeyDown);
     window.addEventListener('mousemove', this.onMouseMove);
     window.addEventListener('mousedown', this.onMouseDown);
     window.addEventListener('mouseup', this.onMouseUp);
     window.addEventListener('contextmenu', this.onContextMenu);
     window.addEventListener('resize', this.onResize);
+
+    // Auto-request lock after brief delay
+    setTimeout(() => {
+      this.requestLock();
+    }, 200);
   }
 
   setAiming(aiming) {
@@ -207,7 +266,7 @@ export class GameEngine {
     // 1. Audio
     sounds.playGunshot(false);
 
-    // 2. Gun recoil
+    // 2. Recoil kick
     this.recoil.pitch += this.isAiming ? 0.05 : 0.09;
     if (this.fpsGun) {
       this.fpsGun.position.z += 0.16;
@@ -224,7 +283,6 @@ export class GameEngine {
     const rayDir = new THREE.Vector3();
     this.camera.getWorldDirection(rayDir);
 
-    // Spread if hipfiring
     if (!this.isAiming) {
       rayDir.x += (Math.random() - 0.5) * 0.02;
       rayDir.y += (Math.random() - 0.5) * 0.02;
@@ -382,7 +440,7 @@ export class GameEngine {
   syncRemotePlayer(remoteState) {
     if (!this.opponent || !this.opponentAlive) return;
 
-    // Invert X for opponent perspective
+    // Invert X for mirrored perspective
     const peekX = -remoteState.peekX;
     const peekY = remoteState.peekY;
 
@@ -395,9 +453,10 @@ export class GameEngine {
     this.opponent.rifleGroup.position.x = peekX + 0.22;
     this.opponent.rifleGroup.position.y = 1.15 + peekY;
 
-    // Scope glint when aiming
     if (this.opponent.glintMesh) {
-      this.opponent.glintMesh.visible = !!remoteState.isAiming;
+      // Glint active when opponent is aiming and exposed
+      const opponentExposed = Math.abs(peekX) > 1.05 || peekY > 0.1;
+      this.opponent.glintMesh.visible = !!remoteState.isAiming && opponentExposed;
     }
   }
 
@@ -407,7 +466,8 @@ export class GameEngine {
     this.botState.timer -= delta;
 
     if (this.botState.action === 'HIDE') {
-      this.botState.targetPos = { x: 0, y: -0.3 };
+      // Ducked completely behind the rock: safe and invisible
+      this.botState.targetPos = { x: 0, y: -0.35 };
       if (this.opponent.glintMesh) this.opponent.glintMesh.visible = false;
 
       if (this.botState.timer <= 0) {
@@ -421,13 +481,15 @@ export class GameEngine {
         ];
         this.botState.targetPos = choices[Math.floor(Math.random() * choices.length)];
         this.botState.action = 'PEEK';
-        this.botState.timer = 2.2 + Math.random() * 1.2; // Stay visible long enough to be spotted!
+        this.botState.timer = 2.2 + Math.random() * 1.2;
         this.botState.aimDuration = 0;
       }
     } else if (this.botState.action === 'PEEK') {
       if (this.opponent.glintMesh) this.opponent.glintMesh.visible = true;
 
-      // If player is exposed, bot starts tracking
+      // RECIPROCAL VISIBILITY:
+      // Bot can ONLY spot the player if the player is ALSO exposed (peeking)!
+      // If player is ducked in cover, bot cannot see player!
       if (!this.isCovered) {
         this.botState.aimDuration += delta;
         if (this.botState.aimDuration >= this.botState.reactionTime) {
@@ -436,6 +498,7 @@ export class GameEngine {
           this.botState.timer = 1.6 + Math.random() * 1.0;
         }
       } else {
+        // Player is hidden behind rock, bot cannot see player
         if (this.botState.timer <= 0) {
           this.botState.action = 'HIDE';
           this.botState.timer = 1.2 + Math.random() * 1.2;
@@ -464,6 +527,7 @@ export class GameEngine {
     ));
 
     let hitPlayer = false;
+    // Bot hits if player is still exposed
     if (!this.isCovered && Math.random() < 0.8) {
       hitPlayer = true;
     }
@@ -496,9 +560,9 @@ export class GameEngine {
       this.peekOffset.y = THREE.MathUtils.lerp(this.peekOffset.y, this.targetLean.y, delta * 14);
 
       // 2. Camera position based on lean
-      // Ducked base height: 1.18m (behind rock).
-      // Leaning up raises to 1.60m (over rock).
-      // Leaning left/right shifts x by up to 1.4m (past rock edge).
+      // Base crouching eye height: 1.18m (fully concealed behind 1.4m rock)
+      // Standing/peeking up raises to 1.60m (clear view over top)
+      // Leaning left/right shifts x by up to 1.4m (clear view around rock side)
       this.camera.position.x = this.peekOffset.x;
       this.camera.position.y = 1.18 + Math.max(0, this.peekOffset.y);
       this.camera.position.z = 0;
@@ -529,10 +593,12 @@ export class GameEngine {
         this.fpsGun.rotation.x = THREE.MathUtils.lerp(this.fpsGun.rotation.x, 0, delta * 12);
       }
 
-      // 6. Cover detection:
-      // Rock half-width: ~1.15m. Rock height: ~1.35m.
-      // If camera |x| > 1.1m (leaned out to side) OR camera y > 1.36m (peeking over top), player is EXPOSED!
-      const isExposed = Math.abs(this.camera.position.x) > 1.05 || this.camera.position.y > 1.35;
+      // 6. Reciprocal Cover Detection:
+      // The exact moment camera clears the rock's edge:
+      // - If camera |x| > 1.05m (leaning around the side) OR camera y > 1.36m (peeking over top),
+      //   the player can see the opponent, AND the opponent can see the player!
+      // - Otherwise, you are ducked behind your rock: you cannot see the opponent, and they cannot see you!
+      const isExposed = Math.abs(this.camera.position.x) > 1.05 || this.camera.position.y > 1.36;
       const newCoverState = !isExposed;
       if (newCoverState !== this.isCovered) {
         this.isCovered = newCoverState;
@@ -605,17 +671,22 @@ export class GameEngine {
 
     if (this.isBotMode) {
       this.botState.action = 'HIDE';
-      this.botState.timer = 1.2;
+      this.botState.timer = 1.5;
     }
   }
 
   destroy() {
     cancelAnimationFrame(this.animationFrameId);
+    this.container.removeEventListener('click', this.onCanvasClick);
+    document.removeEventListener('pointerlockchange', this.onLockChange);
+    window.removeEventListener('keydown', this.onKeyDown);
     window.removeEventListener('mousemove', this.onMouseMove);
     window.removeEventListener('mousedown', this.onMouseDown);
     window.removeEventListener('mouseup', this.onMouseUp);
     window.removeEventListener('contextmenu', this.onContextMenu);
     window.removeEventListener('resize', this.onResize);
+
+    this.exitLock();
 
     if (this.renderer && this.renderer.domElement) {
       this.renderer.domElement.remove();

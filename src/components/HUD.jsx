@@ -1,5 +1,5 @@
 import React from 'react';
-import { Award, Volume2, VolumeX, LogOut } from 'lucide-react';
+import { Award, Volume2, VolumeX, LogOut, MousePointer } from 'lucide-react';
 
 export function HUD({
   isAiming,
@@ -9,6 +9,7 @@ export function HUD({
   roundStatus,
   roundMessage,
   isBotMode,
+  isLocked,
   muted,
   onToggleMute,
   onExitMatch,
@@ -21,7 +22,7 @@ export function HUD({
 
   return (
     <div className="absolute inset-0 pointer-events-none select-none overflow-hidden">
-      {/* 1. TOP-LEFT: EXIT / LEAVE MATCH BUTTON */}
+      {/* 1. TOP-LEFT: EXIT MATCH BUTTON */}
       <div className="absolute top-4 left-4 pointer-events-auto z-20">
         <button
           onClick={onExitMatch}
@@ -65,7 +66,17 @@ export function HUD({
         </button>
       </div>
 
-      {/* 4. ADS SNIPER SCOPE (When right-click aiming) */}
+      {/* 4. POINTER LOCK PROMPT (When mouse is not locked) */}
+      {!isLocked && !roundStatus && (
+        <div className="absolute top-20 left-1/2 -translate-x-1/2 z-30 pointer-events-none">
+          <div className="flex items-center gap-2 bg-stone-900/90 border border-amber-500/50 text-amber-300 px-4 py-2 rounded-full text-xs font-semibold shadow-xl animate-pulse backdrop-blur-md">
+            <MousePointer size={14} className="text-amber-400" />
+            <span>Nhấp vào màn hình để khóa chuột ngắm bắn • Bấm <kbd className="px-1.5 py-0.5 bg-stone-800 rounded font-mono text-white text-[11px]">Ctrl + Alt</kbd> để thoát chuột</span>
+          </div>
+        </div>
+      )}
+
+      {/* 5. ADS SNIPER SCOPE (When right-click aiming) */}
       {isAiming && (
         <div className="absolute inset-0 flex items-center justify-center z-10">
           <div className="w-[560px] h-[560px] rounded-full scope-ring relative border-2 border-stone-900/90 pointer-events-none">
@@ -86,7 +97,7 @@ export function HUD({
         </div>
       )}
 
-      {/* 5. HIPFIRE CROSSHAIR (When not aiming) */}
+      {/* 6. HIPFIRE CROSSHAIR (When not aiming) */}
       {!isAiming && (
         <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-10 flex items-center justify-center pointer-events-none">
           <div className="w-1.5 h-1.5 rounded-full bg-amber-400 shadow-[0_0_6px_rgba(251,191,36,0.9)]" />
@@ -97,7 +108,7 @@ export function HUD({
         </div>
       )}
 
-      {/* 6. BOTTOM-RIGHT: BOLT RELOAD & CONTROLS HELPER */}
+      {/* 7. BOTTOM-RIGHT: BOLT RELOAD & CONTROLS HELPER */}
       <div className="absolute bottom-5 right-5 z-20 flex flex-col items-end gap-2">
         <div className="bg-stone-900/90 backdrop-blur-md px-4 py-2.5 rounded-xl border border-stone-700/60 shadow-xl flex items-center gap-3">
           <div className="text-right">
@@ -115,10 +126,12 @@ export function HUD({
           <span><kbd className="px-1 py-0.5 bg-stone-800 rounded text-amber-300 font-mono">Chuột Phải</kbd> Ngắm</span>
           <span>•</span>
           <span><kbd className="px-1 py-0.5 bg-stone-800 rounded text-amber-300 font-mono">Chuột Trái</kbd> Bắn</span>
+          <span>•</span>
+          <span><kbd className="px-1 py-0.5 bg-stone-800 rounded text-amber-300 font-mono">Ctrl+Alt</kbd> Thoát chuột</span>
         </div>
       </div>
 
-      {/* 7. ROUND END NOTIFICATION BANNER */}
+      {/* 8. ROUND END NOTIFICATION BANNER */}
       {roundStatus && (
         <div className="absolute inset-0 flex items-center justify-center bg-black/60 backdrop-blur-sm z-30 transition-all">
           <div className="text-center p-8 bg-stone-900/95 border border-stone-700 rounded-3xl shadow-2xl max-w-sm mx-4 animate-in fade-in zoom-in duration-200">
