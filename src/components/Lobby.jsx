@@ -57,7 +57,7 @@ export function Lobby({
             ROCK DUEL
           </h1>
           <p className="text-stone-400 text-xs sm:text-sm mt-1">
-            Di chuột để ngó đầu ra khỏi tảng đá • Chĩa súng ngắm bắn đối thủ
+            Phím A / D / W để ngó đầu ra khỏi đá • Chuột ngắm bắn tỉa đối thủ
           </p>
         </div>
 
@@ -117,7 +117,6 @@ export function Lobby({
         {/* Tab Content: Online Mode */}
         {activeTab === 'online' && (
           <div className="flex flex-col gap-4">
-            {/* Host room button */}
             {!roomId && (
               <div className="flex flex-col sm:flex-row gap-3">
                 <button
@@ -129,7 +128,6 @@ export function Lobby({
               </div>
             )}
 
-            {/* Waiting for friend / Connection state */}
             {roomId && isWaitingForPeer && (
               <div className="p-4 bg-stone-950/80 border border-amber-500/40 rounded-2xl flex flex-col gap-3">
                 <div className="flex items-center justify-between">
@@ -159,7 +157,6 @@ export function Lobby({
               </div>
             )}
 
-            {/* Join room section */}
             {!roomId && (
               <div className="pt-2 border-t border-stone-800 flex flex-col gap-2">
                 <label className="text-xs text-stone-400 font-semibold">
@@ -196,7 +193,7 @@ export function Lobby({
         {activeTab === 'bot' && (
           <div className="flex flex-col gap-4">
             <div className="p-4 bg-stone-950/60 rounded-2xl border border-stone-800 text-xs text-stone-400 leading-relaxed">
-              Bạn sẽ đấu với <b>Bot Tinh Anh</b> nấp sau tảng đá đối diện. Bot sẽ thò đầu ra các góc (trái, phải, ngẩng lên) kèm vệt sáng ống ngắm vàng để bạn phát hiện và ngắm bắn!
+              Bạn sẽ đấu với <b>Bot Tinh Anh</b> nấp sau tảng đá đối diện. Dùng phím <b>A / D / W</b> để ngó ra và lia chuột ngắm bắn tỉa vào đối thủ!
             </div>
             <button
               onClick={onStartSolo}
@@ -211,15 +208,15 @@ export function Lobby({
         <div className="pt-3 border-t border-stone-800/80 flex flex-wrap items-center justify-between text-[11px] text-stone-400 gap-2">
           <div className="flex items-center gap-1.5">
             <Compass size={13} className="text-amber-400" />
-            <span>Di chuột: Ngó đầu ra & Chĩa súng vào địch</span>
+            <span>Phím A/D/W: Ngó Trái / Phải / Lên</span>
           </div>
           <div className="flex items-center gap-1.5">
             <Target size={13} className="text-amber-400" />
-            <span>Chuột phải: Bật kính ngắm ADS</span>
+            <span>Chuột: Ngắm tự do (Chuột Phải: ADS)</span>
           </div>
           <div className="flex items-center gap-1.5">
             <Shield size={13} className="text-amber-400" />
-            <span>Chuột trái: Bắn đạn</span>
+            <span>Chuột Trái: Bắn</span>
           </div>
         </div>
       </div>

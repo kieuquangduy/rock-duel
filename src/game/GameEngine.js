@@ -23,11 +23,19 @@ export class GameEngine {
     this.isCovered = true;
     this.isLocked = false;
 
-    // Aim angles (Pitch & Yaw)
-    this.aimYaw = 0;   // Radians (left/right)
-    this.aimPitch = 0; // Radians (up/down)
+    // Keyboard state for leaning & cover
+    this.keys = {
+      up: false,    // W or ArrowUp: Peek up / Stand over rock
+      down: false,  // S or ArrowDown or C: Duck deep in cover
+      left: false,  // A or ArrowLeft: Lean left out of rock
+      right: false, // D or ArrowRight: Lean right out of rock
+    };
 
-    // Dynamic Peek Offset (Lean) calculated from aim & mouse
+    // Aim angles (Pitch & Yaw - 100% mouse controlled)
+    this.aimYaw = 0;   // Radians (horizontal aim)
+    this.aimPitch = 0; // Radians (vertical aim)
+
+    // Dynamic Peek Offset (Lean) controlled by keyboard
     this.peekOffset = { x: 0, y: 0 };
     this.targetLean = { x: 0, y: 0 };
 
@@ -106,12 +114,10 @@ export class GameEngine {
     this.scene.add(this.playerRock);
 
     // 7. Opponent's Rock & Opponent Avatar
-    // Opponent rock is at -mapDistance
     this.opponentRock = createProceduralRock(2.4, 1.4, 1.8, 99);
     this.opponentRock.position.set(0, 0.7, -this.mapDistance);
     this.scene.add(this.opponentRock);
 
-    // CRITICAL: Opponent Avatar is placed BEHIND opponent's rock (further back at -mapDistance - 0.35m)
     this.opponent = createOpponentAvatar();
     this.opponent.group.position.set(0, 0, -this.mapDistance - 0.35);
     this.scene.add(this.opponent.group);
@@ -150,7 +156,6 @@ export class GameEngine {
   }
 
   initListeners() {
-    // Click on canvas to lock mouse
     this.onCanvasClick = () => {
       sounds.init();
       if (this.isAlive && !document.pointerLockElement) {
@@ -158,24 +163,49 @@ export class GameEngine {
       }
     };
 
-    // Listen for pointer lock changes
     this.onLockChange = () => {
       this.isLocked = document.pointerLockElement === this.renderer.domElement;
       this.onPointerLockChange(this.isLocked);
     };
 
-    // Hotkey: Ctrl + Alt or Escape to unlock cursor
+    // Keyboard controls for leaning / peeking
     this.onKeyDown = (e) => {
+      // Release pointer lock on Ctrl + Alt or Escape
       if ((e.ctrlKey && e.altKey) || e.key === 'Escape') {
         this.exitLock();
+        return;
+      }
+
+      if (!this.isAlive) return;
+
+      const code = e.code;
+      if (code === 'KeyW' || code === 'ArrowUp' || code === 'Space') {
+        this.keys.up = true;
+      } else if (code === 'KeyS' || code === 'ArrowDown' || code === 'KeyC') {
+        this.keys.down = true;
+      } else if (code === 'KeyA' || code === 'ArrowLeft') {
+        this.keys.left = true;
+      } else if (code === 'KeyD' || code === 'ArrowRight') {
+        this.keys.right = true;
       }
     };
 
+    this.onKeyUp = (e) => {
+      const code = e.code;
+      if (code === 'KeyW' || code === 'ArrowUp' || code === 'Space') {
+        this.keys.up = false;
+      } else if (code === 'KeyS' || code === 'ArrowDown' || code === 'KeyC') {
+        this.keys.down = false;
+      } else if (code === 'KeyA' || code === 'ArrowLeft') {
+        this.keys.left = false;
+      } else if (code === 'KeyD' || code === 'ArrowRight') {
+        this.keys.right = false;
+      }
+    };
+
+    // Mouse movement: 100% dedicated to free aiming!
     this.onMouseMove = (e) => {
       if (!this.isAlive) return;
-
-      // Only control aim & lean when pointer lock is active!
-      // This guarantees no OS cursor is shown and no dual-cursor confusion exists.
       if (!document.pointerLockElement) return;
 
       const deltaX = e.movementX || 0;
@@ -183,21 +213,13 @@ export class GameEngine {
 
       const sens = this.isAiming ? this.mouseSensitivity * 0.45 : this.mouseSensitivity;
 
-      // Update aim angles
+      // Pitch and Yaw free crosshair adjustment
       this.aimYaw -= deltaX * sens;
       this.aimPitch -= deltaY * sens;
 
-      // Clamp yaw and pitch
-      this.aimYaw = THREE.MathUtils.clamp(this.aimYaw, -0.65, 0.65);
-      this.aimPitch = THREE.MathUtils.clamp(this.aimPitch, -0.35, 0.45);
-
-      // Body lean directly tied to aim:
-      // Aiming left -> leans left out of cover
-      // Aiming right -> leans right out of cover
-      // Aiming up -> raises head above rock
-      // Aiming down / center -> ducked safely behind rock
-      this.targetLean.x = this.aimYaw * 2.3;
-      this.targetLean.y = this.aimPitch * 1.5;
+      // Allow wide aiming range
+      this.aimYaw = THREE.MathUtils.clamp(this.aimYaw, -1.2, 1.2);
+      this.aimPitch = THREE.MathUtils.clamp(this.aimPitch, -0.65, 0.65);
     };
 
     this.onMouseDown = (e) => {
@@ -240,13 +262,13 @@ export class GameEngine {
     this.container.addEventListener('click', this.onCanvasClick);
     document.addEventListener('pointerlockchange', this.onLockChange);
     window.addEventListener('keydown', this.onKeyDown);
+    window.addEventListener('keyup', this.onKeyUp);
     window.addEventListener('mousemove', this.onMouseMove);
     window.addEventListener('mousedown', this.onMouseDown);
     window.addEventListener('mouseup', this.onMouseUp);
     window.addEventListener('contextmenu', this.onContextMenu);
     window.addEventListener('resize', this.onResize);
 
-    // Auto-request lock after brief delay
     setTimeout(() => {
       this.requestLock();
     }, 200);
@@ -267,7 +289,7 @@ export class GameEngine {
     sounds.playGunshot(false);
 
     // 2. Recoil kick
-    this.recoil.pitch += this.isAiming ? 0.05 : 0.09;
+    this.recoil.pitch += this.isAiming ? 0.04 : 0.08;
     if (this.fpsGun) {
       this.fpsGun.position.z += 0.16;
       this.fpsGun.rotation.x += 0.1;
@@ -284,8 +306,8 @@ export class GameEngine {
     this.camera.getWorldDirection(rayDir);
 
     if (!this.isAiming) {
-      rayDir.x += (Math.random() - 0.5) * 0.02;
-      rayDir.y += (Math.random() - 0.5) * 0.02;
+      rayDir.x += (Math.random() - 0.5) * 0.015;
+      rayDir.y += (Math.random() - 0.5) * 0.015;
       rayDir.normalize();
     }
 
@@ -454,7 +476,6 @@ export class GameEngine {
     this.opponent.rifleGroup.position.y = 1.15 + peekY;
 
     if (this.opponent.glintMesh) {
-      // Glint active when opponent is aiming and exposed
       const opponentExposed = Math.abs(peekX) > 1.05 || peekY > 0.1;
       this.opponent.glintMesh.visible = !!remoteState.isAiming && opponentExposed;
     }
@@ -466,12 +487,10 @@ export class GameEngine {
     this.botState.timer -= delta;
 
     if (this.botState.action === 'HIDE') {
-      // Ducked completely behind the rock: safe and invisible
       this.botState.targetPos = { x: 0, y: -0.35 };
       if (this.opponent.glintMesh) this.opponent.glintMesh.visible = false;
 
       if (this.botState.timer <= 0) {
-        // Pick a distinct peek direction
         const choices = [
           { x: -1.3, y: 0.15 }, // Peek Left past the rock
           { x: 1.3, y: 0.15 },  // Peek Right past the rock
@@ -487,9 +506,7 @@ export class GameEngine {
     } else if (this.botState.action === 'PEEK') {
       if (this.opponent.glintMesh) this.opponent.glintMesh.visible = true;
 
-      // RECIPROCAL VISIBILITY:
-      // Bot can ONLY spot the player if the player is ALSO exposed (peeking)!
-      // If player is ducked in cover, bot cannot see player!
+      // Reciprocal visibility: Bot only sees player if player is also peeking out
       if (!this.isCovered) {
         this.botState.aimDuration += delta;
         if (this.botState.aimDuration >= this.botState.reactionTime) {
@@ -498,7 +515,6 @@ export class GameEngine {
           this.botState.timer = 1.6 + Math.random() * 1.0;
         }
       } else {
-        // Player is hidden behind rock, bot cannot see player
         if (this.botState.timer <= 0) {
           this.botState.action = 'HIDE';
           this.botState.timer = 1.2 + Math.random() * 1.2;
@@ -527,7 +543,6 @@ export class GameEngine {
     ));
 
     let hitPlayer = false;
-    // Bot hits if player is still exposed
     if (!this.isCovered && Math.random() < 0.8) {
       hitPlayer = true;
     }
@@ -555,19 +570,28 @@ export class GameEngine {
       const delta = Math.min(this.clock.getDelta(), 0.1);
       this.swayTime += delta;
 
-      // 1. Smoothly interpolate lean offset
+      // 1. Calculate Target Lean based on Key Presses (W/A/S/D or Arrows)
+      let targetX = 0;
+      let targetY = 0;
+
+      if (this.keys.left) targetX -= 1.35;  // Lean Left
+      if (this.keys.right) targetX += 1.35; // Lean Right
+      if (this.keys.up) targetY += 0.45;     // Peek Over Top
+      if (this.keys.down) targetY -= 0.25;   // Deep Crouch Cover
+
+      this.targetLean.x = targetX;
+      this.targetLean.y = targetY;
+
+      // Smoothly interpolate body lean offset
       this.peekOffset.x = THREE.MathUtils.lerp(this.peekOffset.x, this.targetLean.x, delta * 14);
       this.peekOffset.y = THREE.MathUtils.lerp(this.peekOffset.y, this.targetLean.y, delta * 14);
 
-      // 2. Camera position based on lean
-      // Base crouching eye height: 1.18m (fully concealed behind 1.4m rock)
-      // Standing/peeking up raises to 1.60m (clear view over top)
-      // Leaning left/right shifts x by up to 1.4m (clear view around rock side)
+      // 2. Camera position based on body lean
       this.camera.position.x = this.peekOffset.x;
-      this.camera.position.y = 1.18 + Math.max(0, this.peekOffset.y);
+      this.camera.position.y = 1.18 + this.peekOffset.y;
       this.camera.position.z = 0;
 
-      // 3. Camera Rotation = Aiming angles + recoil
+      // 3. Camera Rotation = 100% Free Mouse Aiming (Pitch & Yaw) + Recoil
       this.recoil.pitch = THREE.MathUtils.lerp(this.recoil.pitch, 0, delta * 12);
       this.camera.rotation.order = 'YXZ';
       this.camera.rotation.y = this.aimYaw;
@@ -594,10 +618,8 @@ export class GameEngine {
       }
 
       // 6. Reciprocal Cover Detection:
-      // The exact moment camera clears the rock's edge:
-      // - If camera |x| > 1.05m (leaning around the side) OR camera y > 1.36m (peeking over top),
-      //   the player can see the opponent, AND the opponent can see the player!
-      // - Otherwise, you are ducked behind your rock: you cannot see the opponent, and they cannot see you!
+      // Rock width is ~2.4m (|x| < 1.15m), height is ~1.4m (y < 1.36m).
+      // Exposed when leaning left/right (|x| > 1.05m) OR peeking over top (y > 1.36m).
       const isExposed = Math.abs(this.camera.position.x) > 1.05 || this.camera.position.y > 1.36;
       const newCoverState = !isExposed;
       if (newCoverState !== this.isCovered) {
@@ -680,6 +702,7 @@ export class GameEngine {
     this.container.removeEventListener('click', this.onCanvasClick);
     document.removeEventListener('pointerlockchange', this.onLockChange);
     window.removeEventListener('keydown', this.onKeyDown);
+    window.removeEventListener('keyup', this.onKeyUp);
     window.removeEventListener('mousemove', this.onMouseMove);
     window.removeEventListener('mousedown', this.onMouseDown);
     window.removeEventListener('mouseup', this.onMouseUp);

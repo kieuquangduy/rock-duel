@@ -108,7 +108,7 @@ export function HUD({
         </div>
       )}
 
-      {/* 7. BOTTOM-RIGHT: BOLT RELOAD & CONTROLS HELPER */}
+      {/* 7. BOTTOM-RIGHT: BOLT RELOAD & NEW KEYBOARD/MOUSE CONTROLS */}
       <div className="absolute bottom-5 right-5 z-20 flex flex-col items-end gap-2">
         <div className="bg-stone-900/90 backdrop-blur-md px-4 py-2.5 rounded-xl border border-stone-700/60 shadow-xl flex items-center gap-3">
           <div className="text-right">
@@ -122,12 +122,22 @@ export function HUD({
           <div className={`w-2.5 h-2.5 rounded-full ${canShoot ? 'bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.9)]' : 'bg-stone-600 animate-pulse'}`} />
         </div>
 
-        <div className="flex items-center gap-2 text-[10px] text-stone-400 bg-stone-900/60 px-3 py-1 rounded-lg border border-stone-800">
-          <span><kbd className="px-1 py-0.5 bg-stone-800 rounded text-amber-300 font-mono">Chuột Phải</kbd> Ngắm</span>
-          <span>•</span>
-          <span><kbd className="px-1 py-0.5 bg-stone-800 rounded text-amber-300 font-mono">Chuột Trái</kbd> Bắn</span>
-          <span>•</span>
-          <span><kbd className="px-1 py-0.5 bg-stone-800 rounded text-amber-300 font-mono">Ctrl+Alt</kbd> Thoát chuột</span>
+        {/* Clear Key Mapping */}
+        <div className="flex flex-col items-end gap-1 text-[11px] text-stone-300 bg-stone-900/85 backdrop-blur-md px-3.5 py-2 rounded-xl border border-stone-700/60 shadow-lg">
+          <div className="flex items-center gap-2">
+            <span><kbd className="px-1.5 py-0.5 bg-stone-800 rounded text-amber-300 font-mono font-bold">A</kbd> / <kbd className="px-1.5 py-0.5 bg-stone-800 rounded text-amber-300 font-mono font-bold">D</kbd>: Ngó Trái / Phải</span>
+            <span>•</span>
+            <span><kbd className="px-1.5 py-0.5 bg-stone-800 rounded text-amber-300 font-mono font-bold">W</kbd>: Nhổm lên ngó</span>
+            <span>•</span>
+            <span><kbd className="px-1.5 py-0.5 bg-stone-800 rounded text-amber-300 font-mono font-bold">S</kbd>: Nấp</span>
+          </div>
+          <div className="flex items-center gap-2 text-stone-400 text-[10px]">
+            <span><kbd className="px-1 py-0.5 bg-stone-800 rounded text-stone-300">Chuột</kbd>: Ngắm tự do</span>
+            <span>•</span>
+            <span><kbd className="px-1 py-0.5 bg-stone-800 rounded text-stone-300">Chuột Phải</kbd>: Zoom ngắm</span>
+            <span>•</span>
+            <span><kbd className="px-1 py-0.5 bg-stone-800 rounded text-stone-300">Chuột Trái</kbd>: Bắn</span>
+          </div>
         </div>
       </div>
 
