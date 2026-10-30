@@ -11,6 +11,7 @@ export class GameEngine {
     this.onCoverChange = options.onCoverChange || (() => {});
     this.onBoltState = options.onBoltState || (() => {});
     this.onPointerLockChange = options.onPointerLockChange || (() => {});
+    this.onAimChange = options.onAimChange || (() => {});
 
     this.mapDistance = options.mapDistance || 35; // 18, 35, 60
     this.isBotMode = options.isBotMode ?? true;
@@ -22,6 +23,13 @@ export class GameEngine {
     this.canShoot = true;
     this.isCovered = true;
     this.isLocked = false;
+
+    // Remote player interpolation targets
+    this.remoteTarget = {
+      peekX: 0,
+      peekY: 0,
+      isAiming: false,
+    };
 
     // Keyboard state for leaning & cover
     this.keys = {
@@ -260,6 +268,7 @@ export class GameEngine {
   setAiming(aiming) {
     if (this.isAiming === aiming) return;
     this.isAiming = aiming;
+    this.onAimChange(this.isAiming);
   }
 
   shoot() {
@@ -423,22 +432,9 @@ export class GameEngine {
   syncRemotePlayer(remoteState) {
     if (!this.opponent || !this.opponentAlive) return;
 
-    const peekX = -remoteState.peekX;
-    const peekY = remoteState.peekY;
-
-    this.opponent.headGroup.position.x = peekX;
-    this.opponent.headGroup.position.y = 1.20 + peekY;
-
-    this.opponent.torsoMesh.position.x = peekX * 0.7;
-    this.opponent.torsoMesh.position.y = 0.65 + peekY * 0.7;
-
-    this.opponent.rifleGroup.position.x = peekX + 0.22;
-    this.opponent.rifleGroup.position.y = 1.0 + peekY;
-
-    if (this.opponent.glintMesh) {
-      const opponentExposed = Math.abs(peekX) > 1.15 || peekY > 0.18;
-      this.opponent.glintMesh.visible = !!remoteState.isAiming && opponentExposed;
-    }
+    this.remoteTarget.peekX = -remoteState.peekX;
+    this.remoteTarget.peekY = remoteState.peekY;
+    this.remoteTarget.isAiming = !!remoteState.isAiming;
   }
 
   updateBot(delta) {
@@ -633,6 +629,24 @@ export class GameEngine {
 
       this.updateBot(delta);
 
+      // Smooth remote player interpolation (Multiplayer Mode)
+      if (!this.isBotMode && this.opponent && this.opponentAlive) {
+        const lerpSpeed = Math.min(delta * 18, 1);
+        this.opponent.headGroup.position.x = THREE.MathUtils.lerp(this.opponent.headGroup.position.x, this.remoteTarget.peekX, lerpSpeed);
+        this.opponent.headGroup.position.y = THREE.MathUtils.lerp(this.opponent.headGroup.position.y, 1.20 + this.remoteTarget.peekY, lerpSpeed);
+
+        this.opponent.torsoMesh.position.x = THREE.MathUtils.lerp(this.opponent.torsoMesh.position.x, this.remoteTarget.peekX * 0.7, lerpSpeed);
+        this.opponent.torsoMesh.position.y = THREE.MathUtils.lerp(this.opponent.torsoMesh.position.y, 0.65 + this.remoteTarget.peekY * 0.7, lerpSpeed);
+
+        this.opponent.rifleGroup.position.x = THREE.MathUtils.lerp(this.opponent.rifleGroup.position.x, this.remoteTarget.peekX + 0.22, lerpSpeed);
+        this.opponent.rifleGroup.position.y = THREE.MathUtils.lerp(this.opponent.rifleGroup.position.y, 1.0 + this.remoteTarget.peekY, lerpSpeed);
+
+        if (this.opponent.glintMesh) {
+          const opponentExposed = Math.abs(this.opponent.headGroup.position.x) > 1.15 || (this.opponent.headGroup.position.y - 1.20) > 0.18;
+          this.opponent.glintMesh.visible = this.remoteTarget.isAiming && opponentExposed;
+        }
+      }
+
       this.renderer.render(this.scene, this.camera);
     };
 
@@ -645,6 +659,8 @@ export class GameEngine {
     this.canShoot = true;
     this.isAiming = false;
     this.onBoltState(true);
+
+    this.remoteTarget = { peekX: 0, peekY: 0, isAiming: false };
 
     if (this.opponent) {
       this.opponent.group.rotation.x = 0;

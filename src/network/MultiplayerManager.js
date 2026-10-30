@@ -14,6 +14,10 @@ export class MultiplayerManager {
     this.isHost = false;
     this.topic = null;
     this.peerConnected = false;
+
+    // Reliable messaging tracking
+    this.pendingAcks = new Map(); // msgId -> { timer, retriesLeft, packet }
+    this.processedMsgIds = new Set(); // Set of processed msgIds for deduplication
   }
 
   generateRoomId() {
@@ -42,7 +46,7 @@ export class MultiplayerManager {
     this.onStatus('Đang kết nối tới máy chủ phòng...');
 
     return new Promise((resolve, reject) => {
-      // Connect to high-speed public WSS broker (Zero port blocks, works across all 4G/WiFi)
+      // Connect to high-speed public WSS broker
       const brokerUrl = 'wss://broker.emqx.io:8084/mqtt';
 
       try {
@@ -56,7 +60,8 @@ export class MultiplayerManager {
         this.client.on('connect', () => {
           this.onStatus(this.isHost ? 'Phòng đã mở! Đang chờ bạn bè kết nối...' : `Đang vào phòng ${this.roomId}...`);
 
-          this.client.subscribe(this.topic, { qos: 0 }, (err) => {
+          // Subscribe with QoS 1 for reliable delivery of critical packets
+          this.client.subscribe(this.topic, { qos: 1 }, (err) => {
             if (err) {
               this.onError(err);
               reject(err);
@@ -64,7 +69,7 @@ export class MultiplayerManager {
             }
 
             // Broadcast presence
-            this.send({ type: 'PRESENCE', isHost: this.isHost });
+            this.send({ type: 'PRESENCE', isHost: this.isHost }, 1);
             resolve(this.roomId);
           });
         });
@@ -75,16 +80,42 @@ export class MultiplayerManager {
             // Ignore messages from self
             if (data.senderId === this.clientId) return;
 
-            // When receiving any message from peer, mark peer as connected
+            // 1. Check if this is an ACK for one of our reliable sent packets
+            if (data.type === 'ACK' && data.ackId) {
+              if (this.pendingAcks.has(data.ackId)) {
+                const entry = this.pendingAcks.get(data.ackId);
+                clearInterval(entry.timer);
+                this.pendingAcks.delete(data.ackId);
+              }
+              return;
+            }
+
+            // 2. If message requires acknowledgement (has msgId), reply with ACK immediately
+            if (data.msgId) {
+              this.send({ type: 'ACK', ackId: data.msgId }, 1);
+
+              // Deduplication check: if already processed this exact message, stop here
+              if (this.processedMsgIds.has(data.msgId)) {
+                return;
+              }
+              this.processedMsgIds.add(data.msgId);
+              // Bounded set to prevent memory growth
+              if (this.processedMsgIds.size > 200) {
+                const oldest = this.processedMsgIds.values().next().value;
+                this.processedMsgIds.delete(oldest);
+              }
+            }
+
+            // 3. Connection state detection
             if (!this.peerConnected) {
               this.peerConnected = true;
               this.onStatus('Đã kết nối với bạn bè! Đang vào game...');
               this.onConnected({ isHost: this.isHost, roomId: this.roomId });
             }
 
-            // If peer announced presence, reply so they know we are ready
+            // 4. Reply to presence
             if (data.type === 'PRESENCE') {
-              this.send({ type: 'PRESENCE_REPLY', isHost: this.isHost });
+              this.send({ type: 'PRESENCE_REPLY', isHost: this.isHost }, 1);
             }
 
             this.onData(data);
@@ -103,21 +134,71 @@ export class MultiplayerManager {
     });
   }
 
-  send(data) {
+  /**
+   * Standard fire-and-forget send (used for 20Hz PEEK telemetry)
+   */
+  send(data, qos = 0) {
     if (this.client && this.client.connected && this.topic) {
       try {
         const payload = JSON.stringify({
           senderId: this.clientId,
           ...data,
         });
-        this.client.publish(this.topic, payload, { qos: 0 });
+        this.client.publish(this.topic, payload, { qos });
       } catch (e) {
         console.error('MQTT publish error:', e);
       }
     }
   }
 
+  /**
+   * Guaranteed reliable send with auto-retry and ACK verification.
+   * Perfect for HIT_CONFIRMED, ROUND_RESET, START_GAME.
+   */
+  sendReliable(data, maxRetries = 15, retryInterval = 120) {
+    if (!this.client || !this.client.connected || !this.topic) return;
+
+    const msgId = `${this.clientId}_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+    const packet = {
+      senderId: this.clientId,
+      ...data,
+      msgId,
+      timestamp: Date.now(),
+    };
+
+    const payload = JSON.stringify(packet);
+
+    // 1. Send first attempt immediately with QoS 1
+    this.client.publish(this.topic, payload, { qos: 1 });
+
+    // 2. Set up retry interval until ACK is received or maxRetries reached
+    let attempts = 0;
+    const timer = setInterval(() => {
+      attempts++;
+      if (attempts >= maxRetries || !this.pendingAcks.has(msgId)) {
+        clearInterval(timer);
+        this.pendingAcks.delete(msgId);
+        return;
+      }
+
+      if (this.client && this.client.connected && this.topic) {
+        this.client.publish(this.topic, payload, { qos: 1 });
+      }
+    }, retryInterval);
+
+    this.pendingAcks.set(msgId, { timer, packet });
+    return msgId;
+  }
+
+  clearAllRetries() {
+    for (const [msgId, entry] of this.pendingAcks.entries()) {
+      clearInterval(entry.timer);
+    }
+    this.pendingAcks.clear();
+  }
+
   destroy() {
+    this.clearAllRetries();
     this.peerConnected = false;
     if (this.client) {
       try {

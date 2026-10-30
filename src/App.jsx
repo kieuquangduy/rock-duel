@@ -16,6 +16,7 @@ export default function App() {
   const isBotModeRef = useRef(true);
   const inGameRef = useRef(false);
   const mapDistanceRef = useRef(35);
+  const roundStatusRef = useRef(null);
 
   // UI & Match states
   const [inGame, setInGame] = useState(false);
@@ -51,6 +52,10 @@ export default function App() {
     mapDistanceRef.current = mapDistance;
   }, [mapDistance]);
 
+  useEffect(() => {
+    roundStatusRef.current = roundStatus;
+  }, [roundStatus]);
+
   // Auto-detect room parameter from URL (?room=duelxxxx)
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -60,25 +65,24 @@ export default function App() {
     }
   }, []);
 
-  // Sync loop: send continuous lean & aim to remote player at 60Hz
+  // Sync loop: send continuous lean & aim to remote player at 20Hz (every 50ms)
   useEffect(() => {
     if (!inGame || isBotMode || !networkRef.current) return;
 
     const interval = setInterval(() => {
-      if (engineRef.current && networkRef.current) {
+      // Only stream when game is actively running (no round win/loss banner) and player is alive
+      if (engineRef.current && networkRef.current && !roundStatusRef.current && engineRef.current.isAlive) {
         const offset = engineRef.current.peekOffset;
         const aiming = engineRef.current.isAiming;
 
-        setIsAiming(aiming);
-
         networkRef.current.send({
           type: 'PEEK',
-          peekX: offset.x,
-          peekY: offset.y,
+          peekX: Math.round(offset.x * 1000) / 1000,
+          peekY: Math.round(offset.y * 1000) / 1000,
           isAiming: aiming,
-        });
+        }, 0);
       }
-    }, 1000 / 60);
+    }, 50);
 
     return () => clearInterval(interval);
   }, [inGame, isBotMode]);
@@ -101,6 +105,7 @@ export default function App() {
     setInGame(true);
     setScores({ player: 0, opponent: 0 });
     setRoundStatus(null);
+    roundStatusRef.current = null;
     setIsWaitingForPeer(false);
 
     setTimeout(() => {
@@ -116,6 +121,9 @@ export default function App() {
         onPointerLockChange: (locked) => {
           setIsLocked(locked);
         },
+        onAimChange: (aiming) => {
+          setIsAiming(aiming);
+        },
         onBoltState: (ready) => {
           setCanShoot(ready);
         },
@@ -124,7 +132,7 @@ export default function App() {
             networkRef.current.send({
               type: 'SHOOT',
               ...shotData,
-            });
+            }, 1);
           }
         },
         onKill: (killInfo) => {
@@ -161,7 +169,11 @@ export default function App() {
 
   // When Local Player lands a killshot
   const handleRoundWon = (killInfo) => {
+    if (roundStatusRef.current) return;
+
     setRoundStatus('WIN');
+    roundStatusRef.current = 'WIN';
+
     const msg = killInfo.isHeadshot
       ? `BẮN TRÚNG ĐẦU! (HEADSHOT • ${killInfo.distance}m)`
       : `Bắn trúng đối thủ • ${killInfo.distance}m`;
@@ -175,9 +187,9 @@ export default function App() {
       return { ...prev, player: newScore };
     });
 
-    // Send authoritative HIT_CONFIRMED to remote player
+    // Send authoritative HIT_CONFIRMED to remote player with auto-retry
     if (!isBotModeRef.current && networkRef.current) {
-      networkRef.current.send({
+      networkRef.current.sendReliable({
         type: 'HIT_CONFIRMED',
         killerId: networkRef.current.clientId,
         isHeadshot: killInfo.isHeadshot,
@@ -185,34 +197,50 @@ export default function App() {
       });
     }
 
+    // Winner authoritatively controls the round transition countdown
     setTimeout(() => {
-      nextRound();
+      nextRoundAuthoritative();
     }, 2800);
   };
 
   // When Local Player gets killed
   const handleRoundLost = (hitInfo) => {
+    if (roundStatusRef.current === 'WIN') return;
+
     if (engineRef.current) {
       engineRef.current.isAlive = false;
       engineRef.current.canShoot = false;
     }
 
     setRoundStatus('LOSS');
+    roundStatusRef.current = 'LOSS';
     setRoundMessage(`${hitInfo.killer || 'Đối thủ'} đã hạ gục bạn!`);
     setScores((prev) => ({ ...prev, opponent: prev.opponent + 1 }));
 
-    setTimeout(() => {
-      nextRound();
-    }, 2800);
+    // In Bot mode, we reset locally after 2.8s
+    // In Online mode, the winner's ROUND_RESET packet will trigger nextRound
+    if (isBotModeRef.current) {
+      setTimeout(() => {
+        nextRoundAuthoritative();
+      }, 2800);
+    } else {
+      // Safety fallback: if ROUND_RESET packet from winner doesn't arrive within 4.5s
+      setTimeout(() => {
+        if (roundStatusRef.current === 'LOSS') {
+          nextRoundAuthoritative();
+        }
+      }, 4500);
+    }
   };
 
-  const nextRound = () => {
+  const nextRoundAuthoritative = () => {
     setRoundStatus(null);
+    roundStatusRef.current = null;
     if (engineRef.current) {
       engineRef.current.resetRound();
     }
     if (!isBotModeRef.current && networkRef.current) {
-      networkRef.current.send({ type: 'ROUND_RESET' });
+      networkRef.current.sendReliable({ type: 'ROUND_RESET' });
     }
   };
 
@@ -226,8 +254,8 @@ export default function App() {
       onConnected: () => {
         clearHandshake();
         handshakeInterval.current = setInterval(() => {
-          net.send({ type: 'START_GAME', distance: mapDistanceRef.current });
-        }, 300);
+          net.sendReliable({ type: 'START_GAME', distance: mapDistanceRef.current });
+        }, 350);
 
         startGame(false, mapDistanceRef.current);
       },
@@ -264,8 +292,8 @@ export default function App() {
       onConnected: () => {
         clearHandshake();
         handshakeInterval.current = setInterval(() => {
-          net.send({ type: 'CLIENT_HELLO' });
-        }, 300);
+          net.sendReliable({ type: 'CLIENT_HELLO' });
+        }, 350);
       },
       onDisconnected: () => {
         setNetworkError('Mất kết nối với chủ phòng!');
@@ -293,7 +321,7 @@ export default function App() {
   const handleForceStart = () => {
     clearHandshake();
     if (networkRef.current) {
-      networkRef.current.send({ type: 'START_GAME', distance: mapDistanceRef.current });
+      networkRef.current.sendReliable({ type: 'START_GAME', distance: mapDistanceRef.current });
     }
     startGame(false, mapDistanceRef.current);
   };
@@ -304,7 +332,7 @@ export default function App() {
     switch (data.type) {
       case 'CLIENT_HELLO':
         if (networkRef.current?.isHost) {
-          networkRef.current.send({ type: 'START_GAME', distance: mapDistanceRef.current });
+          networkRef.current.sendReliable({ type: 'START_GAME', distance: mapDistanceRef.current });
           if (!inGameRef.current) {
             startGame(false, mapDistanceRef.current);
           }
@@ -314,7 +342,7 @@ export default function App() {
       case 'START_GAME':
         clearHandshake();
         if (networkRef.current) {
-          networkRef.current.send({ type: 'START_ACK' });
+          networkRef.current.sendReliable({ type: 'START_ACK' });
         }
         setMapDistance(data.distance);
         if (!inGameRef.current) {
@@ -343,9 +371,11 @@ export default function App() {
 
       // Authoritative Kill: Opponent confirmed they shot us!
       case 'HIT_CONFIRMED':
-        if (engineRef.current && engineRef.current.isAlive) {
-          engineRef.current.isAlive = false;
-          engineRef.current.canShoot = false;
+        if (roundStatusRef.current !== 'WIN') {
+          if (engineRef.current) {
+            engineRef.current.isAlive = false;
+            engineRef.current.canShoot = false;
+          }
           sounds.playDefeat();
           handleRoundLost({
             killer: 'Đối thủ',
@@ -357,6 +387,7 @@ export default function App() {
 
       case 'ROUND_RESET':
         setRoundStatus(null);
+        roundStatusRef.current = null;
         if (engineRef.current) {
           engineRef.current.resetRound();
         }
