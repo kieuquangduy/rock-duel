@@ -12,10 +12,15 @@ export default function App() {
   const networkRef = useRef(null);
   const handshakeInterval = useRef(null);
 
+  // References to avoid stale closures in callbacks
+  const isBotModeRef = useRef(true);
+  const inGameRef = useRef(false);
+  const mapDistanceRef = useRef(35);
+
   // UI & Match states
   const [inGame, setInGame] = useState(false);
   const [isBotMode, setIsBotMode] = useState(true);
-  const [mapDistance, setMapDistance] = useState(35); // Default 35m (Vừa)
+  const [mapDistance, setMapDistance] = useState(35);
   const [scores, setScores] = useState({ player: 0, opponent: 0 });
 
   // In-game real-time HUD states
@@ -33,6 +38,18 @@ export default function App() {
   const [isWaitingForPeer, setIsWaitingForPeer] = useState(false);
   const [networkStatus, setNetworkStatus] = useState('');
   const [networkError, setNetworkError] = useState('');
+
+  useEffect(() => {
+    isBotModeRef.current = isBotMode;
+  }, [isBotMode]);
+
+  useEffect(() => {
+    inGameRef.current = inGame;
+  }, [inGame]);
+
+  useEffect(() => {
+    mapDistanceRef.current = mapDistance;
+  }, [mapDistance]);
 
   // Auto-detect room parameter from URL (?room=duelxxxx)
   useEffect(() => {
@@ -74,8 +91,12 @@ export default function App() {
   };
 
   // Launch the 3D Game Engine
-  const startGame = (botMode = true, distance = mapDistance) => {
+  const startGame = (botMode = true, distance = mapDistanceRef.current) => {
     clearHandshake();
+    isBotModeRef.current = botMode;
+    inGameRef.current = true;
+    mapDistanceRef.current = distance;
+
     setIsBotMode(botMode);
     setInGame(true);
     setScores({ player: 0, opponent: 0 });
@@ -99,7 +120,7 @@ export default function App() {
           setCanShoot(ready);
         },
         onShotFired: (shotData) => {
-          if (!botMode && networkRef.current) {
+          if (!isBotModeRef.current && networkRef.current) {
             networkRef.current.send({
               type: 'SHOOT',
               ...shotData,
@@ -119,6 +140,9 @@ export default function App() {
   // Exit Match and return to Lobby
   const handleExitMatch = () => {
     clearHandshake();
+    isBotModeRef.current = true;
+    inGameRef.current = false;
+
     if (engineRef.current) {
       engineRef.current.destroy();
       engineRef.current = null;
@@ -135,6 +159,7 @@ export default function App() {
     setNetworkError('');
   };
 
+  // When Local Player lands a killshot
   const handleRoundWon = (killInfo) => {
     setRoundStatus('WIN');
     const msg = killInfo.isHeadshot
@@ -150,9 +175,11 @@ export default function App() {
       return { ...prev, player: newScore };
     });
 
-    if (!isBotMode && networkRef.current) {
+    // Send authoritative HIT_CONFIRMED to remote player
+    if (!isBotModeRef.current && networkRef.current) {
       networkRef.current.send({
-        type: 'HIT',
+        type: 'HIT_CONFIRMED',
+        killerId: networkRef.current.clientId,
         isHeadshot: killInfo.isHeadshot,
         distance: killInfo.distance,
       });
@@ -160,17 +187,23 @@ export default function App() {
 
     setTimeout(() => {
       nextRound();
-    }, 2600);
+    }, 2800);
   };
 
+  // When Local Player gets killed
   const handleRoundLost = (hitInfo) => {
+    if (engineRef.current) {
+      engineRef.current.isAlive = false;
+      engineRef.current.canShoot = false;
+    }
+
     setRoundStatus('LOSS');
     setRoundMessage(`${hitInfo.killer || 'Đối thủ'} đã hạ gục bạn!`);
     setScores((prev) => ({ ...prev, opponent: prev.opponent + 1 }));
 
     setTimeout(() => {
       nextRound();
-    }, 2600);
+    }, 2800);
   };
 
   const nextRound = () => {
@@ -178,7 +211,7 @@ export default function App() {
     if (engineRef.current) {
       engineRef.current.resetRound();
     }
-    if (!isBotMode && networkRef.current) {
+    if (!isBotModeRef.current && networkRef.current) {
       networkRef.current.send({ type: 'ROUND_RESET' });
     }
   };
@@ -191,13 +224,12 @@ export default function App() {
     const net = new MultiplayerManager({
       onStatus: (msg) => setNetworkStatus(msg),
       onConnected: () => {
-        // Host sends START_GAME periodically every 300ms until match starts
         clearHandshake();
         handshakeInterval.current = setInterval(() => {
-          net.send({ type: 'START_GAME', distance: mapDistance });
+          net.send({ type: 'START_GAME', distance: mapDistanceRef.current });
         }, 300);
 
-        startGame(false, mapDistance);
+        startGame(false, mapDistanceRef.current);
       },
       onDisconnected: () => {
         setNetworkError('Bạn bè đã ngắt kết nối!');
@@ -207,7 +239,7 @@ export default function App() {
         handleNetworkData(data);
       },
       onError: (err) => {
-        setNetworkError('Lỗi kết nối phòng: ' + (err.message || 'Thử lại'));
+        setNetworkError('Lỗi kết nối: ' + (err.message || 'Thử lại'));
         setIsWaitingForPeer(false);
       },
     });
@@ -230,7 +262,6 @@ export default function App() {
     const net = new MultiplayerManager({
       onStatus: (msg) => setNetworkStatus(msg),
       onConnected: () => {
-        // Client sends CLIENT_HELLO every 300ms until START_GAME arrives
         clearHandshake();
         handshakeInterval.current = setInterval(() => {
           net.send({ type: 'CLIENT_HELLO' });
@@ -244,7 +275,7 @@ export default function App() {
         handleNetworkData(data);
       },
       onError: () => {
-        setNetworkError('Không tìm thấy phòng hoặc mã phòng sai!');
+        setNetworkError('Không tìm thấy phòng!');
         setIsWaitingForPeer(false);
       },
     });
@@ -259,13 +290,12 @@ export default function App() {
     }
   };
 
-  // Manual Force Start button if user doesn't want to wait
   const handleForceStart = () => {
     clearHandshake();
     if (networkRef.current) {
-      networkRef.current.send({ type: 'START_GAME', distance: mapDistance });
+      networkRef.current.send({ type: 'START_GAME', distance: mapDistanceRef.current });
     }
-    startGame(false, mapDistance);
+    startGame(false, mapDistanceRef.current);
   };
 
   const handleNetworkData = (data) => {
@@ -274,9 +304,9 @@ export default function App() {
     switch (data.type) {
       case 'CLIENT_HELLO':
         if (networkRef.current?.isHost) {
-          networkRef.current.send({ type: 'START_GAME', distance: mapDistance });
-          if (!inGame) {
-            startGame(false, mapDistance);
+          networkRef.current.send({ type: 'START_GAME', distance: mapDistanceRef.current });
+          if (!inGameRef.current) {
+            startGame(false, mapDistanceRef.current);
           }
         }
         break;
@@ -287,15 +317,15 @@ export default function App() {
           networkRef.current.send({ type: 'START_ACK' });
         }
         setMapDistance(data.distance);
-        if (!inGame) {
+        if (!inGameRef.current) {
           startGame(false, data.distance);
         }
         break;
 
       case 'START_ACK':
         clearHandshake();
-        if (!inGame) {
-          startGame(false, mapDistance);
+        if (!inGameRef.current) {
+          startGame(false, mapDistanceRef.current);
         }
         break;
 
@@ -311,11 +341,17 @@ export default function App() {
         }
         break;
 
-      case 'HIT':
+      // Authoritative Kill: Opponent confirmed they shot us!
+      case 'HIT_CONFIRMED':
         if (engineRef.current && engineRef.current.isAlive) {
           engineRef.current.isAlive = false;
+          engineRef.current.canShoot = false;
           sounds.playDefeat();
-          handleRoundLost({ killer: 'Đối thủ' });
+          handleRoundLost({
+            killer: 'Đối thủ',
+            isHeadshot: data.isHeadshot,
+            distance: data.distance,
+          });
         }
         break;
 
@@ -368,6 +404,7 @@ export default function App() {
           selectedMap={mapDistance}
           onSelectMap={(dist) => {
             setMapDistance(dist);
+            mapDistanceRef.current = dist;
             if (networkRef.current?.isHost) {
               networkRef.current.send({ type: 'MAP_SELECT', distance: dist });
             }

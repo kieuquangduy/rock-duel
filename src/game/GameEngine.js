@@ -68,7 +68,6 @@ export class GameEngine {
   }
 
   initScene() {
-    // 1. Renderer
     this.renderer = new THREE.WebGLRenderer({ antialias: true });
     this.renderer.setSize(this.container.clientWidth, this.container.clientHeight);
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -79,12 +78,10 @@ export class GameEngine {
     this.renderer.domElement.style.cursor = 'none';
     this.container.appendChild(this.renderer.domElement);
 
-    // 2. Scene
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(0xd9b38c);
     this.scene.fog = new THREE.FogExp2(0xd9b38c, 0.008);
 
-    // 3. Camera (Base crouching eye level 1.05m behind 1.28m boulder)
     this.camera = new THREE.PerspectiveCamera(
       70,
       this.container.clientWidth / this.container.clientHeight,
@@ -94,7 +91,6 @@ export class GameEngine {
     this.baseCamPos = new THREE.Vector3(0, 1.05, 0);
     this.camera.position.copy(this.baseCamPos);
 
-    // 4. Lighting
     const ambientLight = new THREE.AmbientLight(0xfff0dd, 0.75);
     this.scene.add(ambientLight);
 
@@ -105,30 +101,24 @@ export class GameEngine {
     sun.shadow.mapSize.height = 2048;
     this.scene.add(sun);
 
-    // 5. Arena Environment
     this.environment = createDesertEnvironment(this.scene);
 
-    // 6. Player's Rock (Positioned at z = -1.2m, height 1.28m, width 2.3m)
     this.playerRock = createProceduralRock(42);
     this.playerRock.position.set(0, 0, -1.2);
     this.scene.add(this.playerRock);
 
-    // 7. Opponent's Rock & Opponent Avatar
     this.opponentRock = createProceduralRock(99);
     this.opponentRock.position.set(0, 0, -this.mapDistance);
     this.scene.add(this.opponentRock);
 
-    // Opponent placed behind opponent's rock (z = -this.mapDistance - 0.75m)
     this.opponent = createOpponentAvatar();
     this.opponent.group.position.set(0, 0, -this.mapDistance - 0.75);
     this.scene.add(this.opponent.group);
 
-    // 8. First-person Gun Model attached to camera
     this.fpsGun = createFirstPersonRifle();
     this.camera.add(this.fpsGun);
     this.scene.add(this.camera);
 
-    // 9. Muzzle flash light
     this.muzzleLight = new THREE.PointLight(0xffaa22, 0, 7);
     this.muzzleLight.position.set(0.28, -0.15, -1.5);
     this.camera.add(this.muzzleLight);
@@ -202,7 +192,6 @@ export class GameEngine {
       }
     };
 
-    // Mouse movement: 100% free aiming
     this.onMouseMove = (e) => {
       if (!this.isAlive) return;
       if (!document.pointerLockElement) return;
@@ -274,7 +263,8 @@ export class GameEngine {
   }
 
   shoot() {
-    if (!this.isAlive || !this.canShoot) return;
+    // If player is dead or gun is cycling bolt, CANNOT shoot
+    if (!this.isAlive || !this.canShoot || !this.opponentAlive) return;
 
     this.canShoot = false;
     this.onBoltState(false);
@@ -329,10 +319,11 @@ export class GameEngine {
         sounds.playHitmarker();
         this.spawnSparks(hit.point, new THREE.Vector3(0, 0, 1), 0xff2222);
 
-        this.onKill({ isHeadshot: isHead, distance: Math.round(this.mapDistance) });
         this.opponentAlive = false;
         sounds.playVictory();
         this.animateOpponentFall();
+
+        this.onKill({ isHeadshot: isHead, distance: Math.round(this.mapDistance) });
       }
     }
 
@@ -354,6 +345,7 @@ export class GameEngine {
     }, 1100);
   }
 
+  // Remote player shot visualization (sound & tracer)
   onRemoteShot(shotData) {
     sounds.playGunshot(true);
 
@@ -361,19 +353,6 @@ export class GameEngine {
     const endPoint = new THREE.Vector3(...shotData.hitPoint);
 
     this.spawnTracer(origin, endPoint);
-
-    if (this.isAlive) {
-      const rayDir = new THREE.Vector3(...shotData.direction).normalize();
-      const dist = origin.distanceTo(this.camera.position);
-      const closestPoint = origin.clone().add(rayDir.clone().multiplyScalar(dist));
-      const headDist = closestPoint.distanceTo(this.camera.position);
-
-      if (!this.isCovered && headDist < 0.45) {
-        this.isAlive = false;
-        sounds.playDefeat();
-        this.onHit({ killer: 'Đối thủ' });
-      }
-    }
   }
 
   spawnTracer(start, end) {
@@ -468,17 +447,16 @@ export class GameEngine {
     this.botState.timer -= delta;
 
     if (this.botState.action === 'HIDE') {
-      // Neutral ducked behind rock: 100% safe & invisible
       this.botState.targetPos = { x: 0, y: 0 };
       if (this.opponent.glintMesh) this.opponent.glintMesh.visible = false;
 
       if (this.botState.timer <= 0) {
         const choices = [
-          { x: -1.45, y: 0.05 }, // Peek Left past rock
-          { x: 1.45, y: 0.05 },  // Peek Right past rock
-          { x: 0, y: 0.48 },     // Peek Over top ridge of rock
-          { x: -1.15, y: 0.4 },  // Peek Top-Left
-          { x: 1.15, y: 0.4 },   // Peek Top-Right
+          { x: -1.45, y: 0.05 },
+          { x: 1.45, y: 0.05 },
+          { x: 0, y: 0.48 },
+          { x: -1.15, y: 0.4 },
+          { x: 1.15, y: 0.4 },
         ];
         this.botState.targetPos = choices[Math.floor(Math.random() * choices.length)];
         this.botState.action = 'PEEK';
@@ -488,7 +466,6 @@ export class GameEngine {
     } else if (this.botState.action === 'PEEK') {
       if (this.opponent.glintMesh) this.opponent.glintMesh.visible = true;
 
-      // Reciprocal visibility: Bot only shoots if player is ALSO exposed
       if (!this.isCovered) {
         this.botState.aimDuration += delta;
         if (this.botState.aimDuration >= this.botState.reactionTime) {
@@ -552,25 +529,24 @@ export class GameEngine {
       const delta = Math.min(this.clock.getDelta(), 0.1);
       this.swayTime += delta;
 
-      // 1. Target Lean based on Key Presses:
       let targetX = 0;
       let targetY = 0;
       let targetZ = 0;
 
       if (this.keys.left) {
-        targetX -= 1.45;  // Step left past 1.15m rock edge
+        targetX -= 1.45;
         targetZ -= 0.15;
       }
       if (this.keys.right) {
-        targetX += 1.45; // Step right past 1.15m rock edge
+        targetX += 1.45;
         targetZ -= 0.15;
       }
       if (this.keys.up) {
-        targetY += 0.52;  // Rise to 1.05 + 0.52 = 1.57m (clears 1.28m rock ridge by 29cm!)
-        targetZ -= 0.35;  // Lean forward over crest so ridge falls downward away from view!
+        targetY += 0.52;
+        targetZ -= 0.35;
       }
       if (this.keys.down) {
-        targetY -= 0.25;  // Deep duck to 0.80m
+        targetY -= 0.25;
         targetZ += 0.15;
       }
 
@@ -578,36 +554,30 @@ export class GameEngine {
       this.targetLean.y = targetY;
       this.targetLean.z = targetZ;
 
-      // Smoothly interpolate body lean offset
       this.peekOffset.x = THREE.MathUtils.lerp(this.peekOffset.x, this.targetLean.x, delta * 14);
       this.peekOffset.y = THREE.MathUtils.lerp(this.peekOffset.y, this.targetLean.y, delta * 14);
       this.peekOffset.z = THREE.MathUtils.lerp(this.peekOffset.z, this.targetLean.z, delta * 14);
 
-      // 2. Camera position based on body lean
-      // When neutral: camera is at (0, 1.05, 0) - completely covered by 1.28m rock!
       this.camera.position.x = this.peekOffset.x;
       this.camera.position.y = 1.05 + this.peekOffset.y;
       this.camera.position.z = this.peekOffset.z;
 
-      // 3. Camera Rotation = 100% Free Mouse Aiming (Pitch & Yaw) + Recoil
       this.recoil.pitch = THREE.MathUtils.lerp(this.recoil.pitch, 0, delta * 12);
       this.camera.rotation.order = 'YXZ';
       this.camera.rotation.y = this.aimYaw;
       this.camera.rotation.x = this.aimPitch + this.recoil.pitch;
 
-      // 4. Smooth FOV for ADS
       const targetFOV = this.isAiming ? 28 : 70;
       this.camera.fov = THREE.MathUtils.lerp(this.camera.fov, targetFOV, delta * 15);
       this.camera.updateProjectionMatrix();
 
-      // 5. First-person Gun alignment
       if (this.fpsGun) {
         const swayX = Math.sin(this.swayTime * 2.5) * (this.isAiming ? 0.001 : 0.005);
         const swayY = Math.cos(this.swayTime * 5.0) * (this.isAiming ? 0.001 : 0.005);
 
         const targetGunPos = this.isAiming
-          ? new THREE.Vector3(0, -0.145, -0.42) // Centered scope
-          : new THREE.Vector3(0.28, -0.28, -0.55); // Hip position
+          ? new THREE.Vector3(0, -0.145, -0.42)
+          : new THREE.Vector3(0.28, -0.28, -0.55);
 
         this.fpsGun.position.lerp(targetGunPos, delta * 16);
         this.fpsGun.position.x += swayX;
@@ -615,9 +585,6 @@ export class GameEngine {
         this.fpsGun.rotation.x = THREE.MathUtils.lerp(this.fpsGun.rotation.x, 0, delta * 12);
       }
 
-      // 6. Reciprocal Cover Detection:
-      // Rock width: 2.3m (edges at ±1.15m). Rock height: 1.28m.
-      // Exposed when leaning left/right (|x| > 1.15m) OR peeking over crest (y > 1.28m).
       const isExposed = Math.abs(this.camera.position.x) > 1.15 || this.camera.position.y > 1.28;
       const newCoverState = !isExposed;
       if (newCoverState !== this.isCovered) {
@@ -625,7 +592,6 @@ export class GameEngine {
         this.onCoverChange(this.isCovered);
       }
 
-      // 7. Update bullet tracers
       for (let i = this.tracers.length - 1; i >= 0; i--) {
         const t = this.tracers[i];
         t.progress += delta * t.speed;
@@ -641,7 +607,6 @@ export class GameEngine {
         }
       }
 
-      // 8. Update sparks
       for (let i = this.sparks.length - 1; i >= 0; i--) {
         const s = this.sparks[i];
         s.life -= delta;
@@ -666,7 +631,6 @@ export class GameEngine {
         }
       }
 
-      // 9. Update Bot AI
       this.updateBot(delta);
 
       this.renderer.render(this.scene, this.camera);
