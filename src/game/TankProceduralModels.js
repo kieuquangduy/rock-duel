@@ -68,7 +68,7 @@ export function createProceduralTank(isOpponent = false) {
   engineDeck.castShadow = true;
   hullGroup.add(engineDeck);
 
-  // Exhaust vents & radiator grilles
+  // Exhaust vents
   const exhaustL = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 0.5, 8), wheelMat);
   exhaustL.rotation.x = Math.PI / 2;
   exhaustL.position.set(-0.9, 1.05, -2.25);
@@ -204,19 +204,18 @@ export function createProceduralTank(isOpponent = false) {
   barrelGroup.add(muzzleBrake);
 
   // Muzzle Flash Light & Mesh (Glows when fired)
-  const muzzleLight = new THREE.PointLight(0xff7700, 0, 18);
+  const muzzleLight = new THREE.PointLight(0xff7700, 0, 20);
   muzzleLight.position.set(0, 0, 4.8);
   barrelGroup.add(muzzleLight);
 
   const muzzleFlash = new THREE.Mesh(
-    new THREE.DodecahedronGeometry(0.45),
+    new THREE.DodecahedronGeometry(0.55),
     new THREE.MeshBasicMaterial({ color: 0xffea55, transparent: true, opacity: 0 })
   );
   muzzleFlash.position.set(0, 0, 4.8);
   barrelGroup.add(muzzleFlash);
 
   // 5. HITBOXES FOR ARMOR DAMAGE
-  // Attach metadata tags for localized damage calculation
   mainHull.userData = { part: 'HULL_SIDE', tankGroup: root };
   glacis.userData = { part: 'FRONT_ARMOR', tankGroup: root };
   engineDeck.userData = { part: 'REAR_WEAKSPOT', tankGroup: root };
@@ -241,31 +240,30 @@ export function createProceduralTank(isOpponent = false) {
 
 /**
  * Procedural Tank Battlefield Environment
- * Includes:
- * - Rough terrain ground with crater displacement
- * - Concrete Dragon's Teeth (Anti-Tank Obstacles)
- * - Steel Anti-Tank Hedgehogs
- * - Ruined Brick Defensive Walls (Cover)
- * - Tactical Boulders
- * - Natural perimeter cliffs
+ * Clear spawn bases for both players (Z > 24 and Z < -24 are 100% CLEAR).
+ * Strategic obstacles (walls, dragons teeth, boulders) placed in middle arena.
+ * Includes precise segment-distance collision shapes so tanks don't get stuck!
  */
-export function createTankBattlefield(scene, arenaRadius = 90) {
-  const obstacles = []; // Objects with bounding boxes for collision
+export function createTankBattlefield(scene, arenaRadius = 80) {
+  const obstacles = [];
 
   // 1. Terrain Ground
-  const groundGeo = new THREE.PlaneGeometry(arenaRadius * 2.5, arenaRadius * 2.5, 40, 40);
+  const groundGeo = new THREE.PlaneGeometry(arenaRadius * 2.5, arenaRadius * 2.5, 36, 36);
   const pos = groundGeo.attributes.position;
   for (let i = 0; i < pos.count; i++) {
     const x = pos.getX(i);
     const y = pos.getY(i);
-    // Subtle undulation
-    const elevation = Math.sin(x * 0.05) * Math.cos(y * 0.05) * 0.75 + Math.sin(x * 0.02 + y * 0.02) * 1.2;
+    // Flat bases at Z > 22 and Z < -22, rolling dunes in the center
+    let elevation = 0;
+    if (Math.abs(y) < 22) {
+      elevation = Math.sin(x * 0.06) * Math.cos(y * 0.06) * 0.6;
+    }
     pos.setZ(i, elevation);
   }
   groundGeo.computeVertexNormals();
 
   const groundMat = new THREE.MeshStandardMaterial({
-    color: 0x98714b, // Warm dirt/sand
+    color: 0x9c744e,
     roughness: 0.95,
     metalness: 0.05,
     flatShading: true,
@@ -276,18 +274,18 @@ export function createTankBattlefield(scene, arenaRadius = 90) {
   ground.receiveShadow = true;
   scene.add(ground);
 
-  // 2. Defensive Ruined Walls (Tactical Hull-Down Cover)
+  // 2. Ruined Brick Defense Walls (Positioned ONLY in middle combat zone)
   const wallMat = new THREE.MeshStandardMaterial({ color: 0x6e5845, roughness: 0.9, flatShading: true });
-  const wallPositions = [
-    { x: -15, z: 0, rot: 0.1, length: 12 },
-    { x: 15, z: 0, rot: -0.2, length: 12 },
-    { x: 0, z: -25, rot: Math.PI / 2, length: 16 },
-    { x: 0, z: 25, rot: Math.PI / 2, length: 16 },
-    { x: -28, z: -18, rot: 0.6, length: 10 },
-    { x: 28, z: 18, rot: -0.5, length: 10 },
+  const wallDefs = [
+    // Flanking cover walls
+    { x: -16, z: -10, length: 10, rot: 0 },
+    { x: 16, z: 10, length: 10, rot: 0 },
+    // Angled center barriers
+    { x: -8, z: 4, length: 8, rot: 0.4 },
+    { x: 8, z: -4, length: 8, rot: -0.4 },
   ];
 
-  wallPositions.forEach((wp) => {
+  wallDefs.forEach((wp) => {
     const wall = new THREE.Mesh(new THREE.BoxGeometry(wp.length, 1.8, 1.2), wallMat);
     wall.position.set(wp.x, 0.9, wp.z);
     wall.rotation.y = wp.rot;
@@ -295,55 +293,56 @@ export function createTankBattlefield(scene, arenaRadius = 90) {
     wall.receiveShadow = true;
     scene.add(wall);
 
-    wall.geometry.computeBoundingBox();
+    // Precise Line Segment for wall collision calculation
+    const halfL = wp.length * 0.5;
+    const dx = Math.cos(wp.rot) * halfL;
+    const dz = -Math.sin(wp.rot) * halfL;
     obstacles.push({
-      mesh: wall,
-      radius: wp.length * 0.5,
       type: 'WALL',
-      pos: new THREE.Vector2(wp.x, wp.z),
+      mesh: wall,
+      p1: new THREE.Vector2(wp.x - dx, wp.z - dz),
+      p2: new THREE.Vector2(wp.x + dx, wp.z + dz),
+      thickness: 1.2,
     });
   });
 
-  // 3. Concrete Dragon's Teeth (Anti-Tank Pyramids)
+  // 3. Concrete Dragon's Teeth (Anti-Tank Pyramids in tactical chokepoints)
   const toothMat = new THREE.MeshStandardMaterial({ color: 0x777065, roughness: 0.92, flatShading: true });
-  const toothGeo = new THREE.ConeGeometry(1.1, 1.6, 4);
+  const toothGeo = new THREE.ConeGeometry(1.0, 1.5, 4);
 
   const toothClusters = [
-    { cx: -8, cz: 12 },
-    { cx: 8, cz: -12 },
-    { cx: -22, cz: 14 },
-    { cx: 22, cz: -14 },
+    { cx: -24, cz: 0 },
+    { cx: 24, cz: 0 },
   ];
 
   toothClusters.forEach((cl) => {
     for (let r = 0; r < 2; r++) {
-      for (let c = 0; c < 3; c++) {
+      for (let c = 0; c < 2; c++) {
         const tooth = new THREE.Mesh(toothGeo, toothMat);
-        const px = cl.cx + c * 2.2;
-        const pz = cl.cz + r * 2.2;
-        tooth.position.set(px, 0.8, pz);
+        const px = cl.cx + (c - 0.5) * 2.2;
+        const pz = cl.cz + (r - 0.5) * 2.2;
+        tooth.position.set(px, 0.75, pz);
         tooth.rotation.y = Math.PI / 4;
         tooth.castShadow = true;
         scene.add(tooth);
 
         obstacles.push({
+          type: 'CYLINDER',
           mesh: tooth,
-          radius: 1.2,
-          type: 'TOOTH',
           pos: new THREE.Vector2(px, pz),
+          radius: 1.1,
         });
       }
     }
   });
 
-  // 4. Tactical Large Boulders
+  // 4. Tactical Large Boulders (Placed outside spawn lanes)
   const rockMat = new THREE.MeshStandardMaterial({ color: 0x734c32, roughness: 0.95, flatShading: true });
   const boulderCoords = [
-    { x: -32, z: 0, s: 3.5 },
-    { x: 32, z: 0, s: 3.8 },
-    { x: -18, z: -35, s: 4.0 },
-    { x: 18, z: 35, s: 4.2 },
-    { x: 0, z: 0, s: 3.0 }, // Center pillar
+    { x: -30, z: -14, s: 3.5 },
+    { x: 30, z: 14, s: 3.8 },
+    { x: -28, z: 14, s: 3.2 },
+    { x: 28, z: -14, s: 3.4 },
   ];
 
   boulderCoords.forEach((b) => {
@@ -355,19 +354,19 @@ export function createTankBattlefield(scene, arenaRadius = 90) {
     scene.add(rock);
 
     obstacles.push({
+      type: 'CYLINDER',
       mesh: rock,
-      radius: b.s * 0.9,
-      type: 'ROCK',
       pos: new THREE.Vector2(b.x, b.z),
+      radius: b.s * 0.85,
     });
   });
 
-  // 5. Perimeter Canyon Outcrops (Border walls)
-  for (let i = 0; i < 20; i++) {
-    const angle = (i / 20) * Math.PI * 2;
-    const dist = arenaRadius - 4;
+  // 5. Perimeter Boundary Cliffs
+  for (let i = 0; i < 22; i++) {
+    const angle = (i / 22) * Math.PI * 2;
+    const dist = arenaRadius - 3;
     const w = 18 + (i % 3) * 6;
-    const h = 20 + (i % 4) * 8;
+    const h = 22 + (i % 4) * 8;
     const canyon = new THREE.Mesh(
       new THREE.CylinderGeometry(w * 0.6, w, h, 6),
       new THREE.MeshStandardMaterial({ color: 0x653b26, roughness: 0.95, flatShading: true })

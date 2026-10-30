@@ -182,6 +182,7 @@ export default function App() {
         engineRef.current = new TankGameEngine(containerRef.current, {
           mapDistance: distance,
           isBotMode: botMode,
+          isHost: networkRef.current ? networkRef.current.isHost : true,
           onPlayerHpChange: (hp) => setTankPlayerHp(hp),
           onOpponentHpChange: (hp) => setTankOpponentHp(hp),
           onReloadState: (ready, progress) => {
