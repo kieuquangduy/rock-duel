@@ -1,7 +1,9 @@
 import React, { useState } from 'react';
-import { Play, Users, Bot, Copy, Check, Target, Compass, Shield, Zap } from 'lucide-react';
+import { Play, Users, Bot, Copy, Check, Target, Compass, Shield, Zap, Gauge } from 'lucide-react';
 
 export function Lobby({
+  selectedGame = 'rock',
+  onSelectGame,
   onStartSolo,
   onCreateRoom,
   onJoinRoom,
@@ -17,7 +19,8 @@ export function Lobby({
   const [copied, setCopied] = useState(false);
   const [activeTab, setActiveTab] = useState('online');
 
-  const maps = [
+  // Maps for Rock Duel
+  const rockMaps = [
     {
       id: 18,
       name: 'Cự Ly Gần (18m)',
@@ -38,6 +41,30 @@ export function Lobby({
     },
   ];
 
+  // Maps for Tank Duel
+  const tankMaps = [
+    {
+      id: 35,
+      name: 'Chiến Trường Hẹp (35m)',
+      desc: 'Giao tranh tốc độ cao, né vật cản chớp nhoáng và đọ pháo',
+      badge: 'Tốc chiến',
+    },
+    {
+      id: 50,
+      name: 'Chiến Trường Sa Mạc (50m)',
+      desc: 'Địa hình cân bằng với chướng ngại vật bê tông và đá tự nhiên',
+      badge: 'Tiêu chuẩn',
+    },
+    {
+      id: 75,
+      name: 'Bình Nguyên Rộng (75m)',
+      desc: 'Khoảng cách lớn, cơ động đánh bọc sườn và ngắm bắn từ xa',
+      badge: 'Chiến thuật',
+    },
+  ];
+
+  const currentMaps = selectedGame === 'tank' ? tankMaps : rockMaps;
+
   const handleCopyLink = () => {
     if (!roomId) return;
     const url = `${window.location.origin}${window.location.pathname}?room=${roomId}`;
@@ -46,25 +73,72 @@ export function Lobby({
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const isPeerDetected = networkStatus.includes('Phát hiện') || networkStatus.includes('kết nối') || networkStatus.includes('thành công');
+  const isPeerDetected =
+    networkStatus.includes('Phát hiện') ||
+    networkStatus.includes('kết nối') ||
+    networkStatus.includes('thành công');
 
   return (
     <div className="fixed inset-0 bg-stone-950/90 backdrop-blur-md flex items-center justify-center p-4 z-50">
-      <div className="w-full max-w-xl bg-stone-900 border border-stone-800 rounded-3xl p-6 sm:p-8 shadow-2xl flex flex-col gap-6 text-stone-200">
-        {/* Title */}
+      <div className="w-full max-w-xl bg-stone-900 border border-stone-800 rounded-3xl p-6 sm:p-8 shadow-2xl flex flex-col gap-5 text-stone-200">
+        
+        {/* GAME SELECTOR HEADER TAB */}
+        <div className="grid grid-cols-2 p-1.5 bg-stone-950 rounded-2xl border border-stone-800">
+          <button
+            onClick={() => {
+              onSelectGame('rock');
+              onSelectMap(35);
+            }}
+            className={`flex items-center justify-center gap-2 py-3 rounded-xl transition-all ${
+              selectedGame === 'rock'
+                ? 'bg-amber-500 text-stone-950 font-black shadow-lg shadow-amber-500/20'
+                : 'text-stone-400 hover:text-stone-200'
+            }`}
+          >
+            <Target size={18} />
+            <span className="text-xs sm:text-sm uppercase tracking-wider">Đấu Súng Nấp Đá</span>
+          </button>
+
+          <button
+            onClick={() => {
+              onSelectGame('tank');
+              onSelectMap(50);
+            }}
+            className={`flex items-center justify-center gap-2 py-3 rounded-xl transition-all ${
+              selectedGame === 'tank'
+                ? 'bg-amber-500 text-stone-950 font-black shadow-lg shadow-amber-500/20'
+                : 'text-stone-400 hover:text-stone-200'
+            }`}
+          >
+            <Shield size={18} />
+            <span className="text-xs sm:text-sm uppercase tracking-wider">Đấu Xe Tăng 1v1</span>
+          </button>
+        </div>
+
+        {/* Title Description */}
         <div className="text-center">
-          <div className="inline-flex items-center gap-2 px-3 py-1 bg-amber-500/10 border border-amber-500/30 rounded-full text-amber-400 text-xs font-semibold uppercase tracking-wider mb-2">
-            <Target size={14} /> Đấu Súng 1v1 Ẩn Nấp Sau Đá
+          <div className="inline-flex items-center gap-2 px-3 py-1 bg-amber-500/10 border border-amber-500/30 rounded-full text-amber-400 text-xs font-semibold uppercase tracking-wider mb-1.5">
+            {selectedGame === 'tank' ? (
+              <>
+                <Shield size={14} /> Chiến Đấu Xe Tăng 1v1 Thực Địa
+              </>
+            ) : (
+              <>
+                <Target size={14} /> Đấu Súng 1v1 Ẩn Nấp Sau Đá
+              </>
+            )}
           </div>
           <h1 className="text-3xl sm:text-4xl font-black text-amber-300 tracking-wider">
-            ROCK DUEL
+            {selectedGame === 'tank' ? 'TANK DUEL' : 'ROCK DUEL'}
           </h1>
           <p className="text-stone-400 text-xs sm:text-sm mt-1">
-            Phím A / D / W để ngó đầu ra khỏi đá • Chuột ngắm bắn tỉa đối thủ
+            {selectedGame === 'tank'
+              ? 'Lái xe tăng di chuyển thực địa • Xoay tháp pháo 360° ngắm bắn phá giáp đối thủ'
+              : 'Phím A / D / W để ngó đầu ra khỏi đá • Chuột ngắm bắn tỉa đối thủ (1-hit 1-kill)'}
           </p>
         </div>
 
-        {/* Tab selection */}
+        {/* Online / Bot Mode Switcher */}
         <div className="grid grid-cols-2 p-1 bg-stone-950/80 rounded-2xl border border-stone-800 text-sm font-semibold">
           <button
             onClick={() => setActiveTab('online')}
@@ -91,10 +165,10 @@ export function Lobby({
         {/* Map Selection */}
         <div>
           <label className="text-xs uppercase tracking-wider font-bold text-stone-400 mb-2 block">
-            Chọn cự ly giữa 2 tảng đá:
+            {selectedGame === 'tank' ? 'Chọn quy mô chiến trường xe tăng:' : 'Chọn cự ly giữa 2 tảng đá:'}
           </label>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-            {maps.map((m) => (
+            {currentMaps.map((m) => (
               <button
                 key={m.id}
                 onClick={() => onSelectMap(m.id)}
@@ -119,7 +193,7 @@ export function Lobby({
 
         {/* Tab Content: Online Mode */}
         {activeTab === 'online' && (
-          <div className="flex flex-col gap-4">
+          <div className="flex flex-col gap-3">
             {!roomId && (
               <div className="flex flex-col sm:flex-row gap-3">
                 <button
@@ -158,7 +232,6 @@ export function Lobby({
                   {copied ? 'Đã sao chép link mời!' : 'Sao chép link gửi cho bạn bè'}
                 </button>
 
-                {/* Instant Force Start Button if handshaking takes more than 1 second */}
                 {isPeerDetected && (
                   <button
                     onClick={onForceStart}
@@ -206,7 +279,15 @@ export function Lobby({
         {activeTab === 'bot' && (
           <div className="flex flex-col gap-4">
             <div className="p-4 bg-stone-950/60 rounded-2xl border border-stone-800 text-xs text-stone-400 leading-relaxed">
-              Bạn sẽ đấu với <b>Bot Tinh Anh</b> nấp sau tảng đá đối diện. Dùng phím <b>A / D / W</b> để ngó ra và lia chuột ngắm bắn tỉa vào đối thủ!
+              {selectedGame === 'tank' ? (
+                <>
+                  Bạn sẽ lái chiến tăng đối đầu với <b>Chiến Tăng Bot AI</b> trên thực địa. Dùng phím <b>W / S</b> để lái tiến/lùi, <b>A / D</b> đánh lái thân xe, và lia chuột xoay tháp pháo ngắm bắn phá nổ xe địch!
+                </>
+              ) : (
+                <>
+                  Bạn sẽ đấu với <b>Bot Tinh Anh</b> nấp sau tảng đá đối diện. Dùng phím <b>A / D / W</b> để ngó ra và lia chuột ngắm bắn tỉa vào đối thủ!
+                </>
+              )}
             </div>
             <button
               onClick={onStartSolo}
@@ -219,19 +300,39 @@ export function Lobby({
 
         {/* Controls Guide Footer */}
         <div className="pt-3 border-t border-stone-800/80 flex flex-wrap items-center justify-between text-[11px] text-stone-400 gap-2">
-          <div className="flex items-center gap-1.5">
-            <Compass size={13} className="text-amber-400" />
-            <span>Phím A/D/W: Ngó Trái / Phải / Lên</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <Target size={13} className="text-amber-400" />
-            <span>Chuột: Ngắm tự do (Chuột Phải: ADS)</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <Shield size={13} className="text-amber-400" />
-            <span>Chuột Trái: Bắn</span>
-          </div>
+          {selectedGame === 'tank' ? (
+            <>
+              <div className="flex items-center gap-1.5">
+                <Gauge size={13} className="text-amber-400" />
+                <span>W/S/A/D: Lái xe tăng</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <Compass size={13} className="text-amber-400" />
+                <span>Chuột: Xoay tháp pháo (Chuột Phải: ADS)</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <Shield size={13} className="text-amber-400" />
+                <span>Chuột Trái: Bắn pháo 120mm</span>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="flex items-center gap-1.5">
+                <Compass size={13} className="text-amber-400" />
+                <span>Phím A/D/W: Ngó Trái / Phải / Lên</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <Target size={13} className="text-amber-400" />
+                <span>Chuột: Ngắm tự do (Chuột Phải: ADS)</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <Shield size={13} className="text-amber-400" />
+                <span>Chuột Trái: Bắn</span>
+              </div>
+            </>
+          )}
         </div>
+
       </div>
     </div>
   );

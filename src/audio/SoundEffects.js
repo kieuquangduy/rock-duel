@@ -194,6 +194,175 @@ class SoundSynthesizer {
       osc.stop(t + 0.45);
     });
   }
+
+  // --- TANK DUEL SOUND EFFECTS ---
+
+  // Massive 120mm tank cannon blast: deafening shockwave & muzzle blast
+  playTankCannon(isOpponent = false) {
+    if (this.muted) return;
+    this.init();
+    if (!this.ctx) return;
+
+    const t = this.ctx.currentTime;
+    const volumeMult = isOpponent ? 0.7 : 1.0;
+
+    // 1. Massive White Noise Blast (gunpowder ignition)
+    const bufferSize = this.ctx.sampleRate * 0.6;
+    const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < bufferSize; i++) {
+      data[i] = (Math.random() * 2 - 1) * Math.exp(-i / (this.ctx.sampleRate * 0.15));
+    }
+
+    const noise = this.ctx.createBufferSource();
+    noise.buffer = buffer;
+
+    const noiseFilter = this.ctx.createBiquadFilter();
+    noiseFilter.type = 'lowpass';
+    noiseFilter.frequency.setValueAtTime(isOpponent ? 1800 : 3500, t);
+    noiseFilter.frequency.exponentialRampToValueAtTime(200, t + 0.5);
+
+    const noiseGain = this.ctx.createGain();
+    noiseGain.gain.setValueAtTime(1.0 * volumeMult, t);
+    noiseGain.gain.exponentialRampToValueAtTime(0.001, t + 0.55);
+
+    noise.connect(noiseFilter);
+    noiseFilter.connect(noiseGain);
+    noiseGain.connect(this.ctx.destination);
+    noise.start(t);
+
+    // 2. Heavy Sub-bass shockwave (chest-thumping boom)
+    const subOsc = this.ctx.createOscillator();
+    subOsc.type = 'sine';
+    subOsc.frequency.setValueAtTime(140, t);
+    subOsc.frequency.exponentialRampToValueAtTime(25, t + 0.45);
+
+    const subGain = this.ctx.createGain();
+    subGain.gain.setValueAtTime(1.2 * volumeMult, t);
+    subGain.gain.exponentialRampToValueAtTime(0.001, t + 0.5);
+
+    subOsc.connect(subGain);
+    subGain.connect(this.ctx.destination);
+    subOsc.start(t);
+    subOsc.stop(t + 0.6);
+  }
+
+  // Tank Shell Impact (Armor hit / penetration)
+  playTankHit(penetrated = true) {
+    if (this.muted) return;
+    this.init();
+    if (!this.ctx) return;
+
+    const t = this.ctx.currentTime;
+
+    // Metal clang
+    const clang = this.ctx.createOscillator();
+    clang.type = 'triangle';
+    clang.frequency.setValueAtTime(penetrated ? 450 : 850, t);
+    clang.frequency.exponentialRampToValueAtTime(80, t + 0.35);
+
+    const clangGain = this.ctx.createGain();
+    clangGain.gain.setValueAtTime(penetrated ? 0.8 : 0.6, t);
+    clangGain.gain.exponentialRampToValueAtTime(0.001, t + 0.35);
+
+    clang.connect(clangGain);
+    clangGain.connect(this.ctx.destination);
+    clang.start(t);
+    clang.stop(t + 0.4);
+
+    if (penetrated) {
+      // Armor breach crunch
+      const bufferSize = this.ctx.sampleRate * 0.3;
+      const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+      const data = buffer.getChannelData(0);
+      for (let i = 0; i < bufferSize; i++) {
+        data[i] = (Math.random() * 2 - 1) * Math.exp(-i / (this.ctx.sampleRate * 0.08));
+      }
+      const noise = this.ctx.createBufferSource();
+      noise.buffer = buffer;
+      const gain = this.ctx.createGain();
+      gain.gain.setValueAtTime(0.7, t);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + 0.28);
+      noise.connect(gain);
+      gain.connect(this.ctx.destination);
+      noise.start(t);
+    }
+  }
+
+  // Tank Catastrophic Explosion (When HP drops to 0)
+  playTankExplosion() {
+    if (this.muted) return;
+    this.init();
+    if (!this.ctx) return;
+
+    const t = this.ctx.currentTime;
+
+    // Low rumble boom
+    const boom = this.ctx.createOscillator();
+    boom.type = 'sawtooth';
+    boom.frequency.setValueAtTime(110, t);
+    boom.frequency.exponentialRampToValueAtTime(20, t + 1.2);
+
+    const boomGain = this.ctx.createGain();
+    boomGain.gain.setValueAtTime(1.3, t);
+    boomGain.gain.exponentialRampToValueAtTime(0.001, t + 1.2);
+
+    boom.connect(boomGain);
+    boomGain.connect(this.ctx.destination);
+    boom.start(t);
+    boom.stop(t + 1.3);
+
+    // Blast noise
+    const bufferSize = this.ctx.sampleRate * 1.0;
+    const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < bufferSize; i++) {
+      data[i] = (Math.random() * 2 - 1) * Math.exp(-i / (this.ctx.sampleRate * 0.3));
+    }
+    const noise = this.ctx.createBufferSource();
+    noise.buffer = buffer;
+    const noiseGain = this.ctx.createGain();
+    noiseGain.gain.setValueAtTime(0.9, t);
+    noiseGain.gain.exponentialRampToValueAtTime(0.001, t + 0.9);
+    noise.connect(noiseGain);
+    noiseGain.connect(this.ctx.destination);
+    noise.start(t);
+  }
+
+  // Autoloader / Shell Breech reload sound
+  playTankReload() {
+    if (this.muted) return;
+    this.init();
+    if (!this.ctx) return;
+
+    const t = this.ctx.currentTime;
+
+    // Clunk 1: Breech open
+    const osc1 = this.ctx.createOscillator();
+    osc1.type = 'square';
+    osc1.frequency.setValueAtTime(450, t);
+    osc1.frequency.exponentialRampToValueAtTime(180, t + 0.12);
+    const g1 = this.ctx.createGain();
+    g1.gain.setValueAtTime(0.25, t);
+    g1.gain.exponentialRampToValueAtTime(0.001, t + 0.15);
+    osc1.connect(g1);
+    g1.connect(this.ctx.destination);
+    osc1.start(t);
+    osc1.stop(t + 0.16);
+
+    // Clunk 2: Shell locked in breech (Ready)
+    const osc2 = this.ctx.createOscillator();
+    osc2.type = 'triangle';
+    osc2.frequency.setValueAtTime(600, t + 0.25);
+    osc2.frequency.exponentialRampToValueAtTime(900, t + 0.35);
+    const g2 = this.ctx.createGain();
+    g2.gain.setValueAtTime(0.3, t + 0.25);
+    g2.gain.exponentialRampToValueAtTime(0.001, t + 0.4);
+    osc2.connect(g2);
+    g2.connect(this.ctx.destination);
+    osc2.start(t + 0.25);
+    osc2.stop(t + 0.42);
+  }
 }
 
 export const sounds = new SoundSynthesizer();

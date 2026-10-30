@@ -1,42 +1,50 @@
-# 🪨 Rock Duel (Đấu Súng 1v1 Nấp Đá)
+# 🎮 Duel Hub (Rock Duel & Tank Duel 1v1)
 
-Game đấu súng đối kháng 1v1 ẩn nấp thời gian thực (Real-time P2P) chạy trực tiếp trên nền web trình duyệt và triển khai dễ dàng qua Vercel.
+Hệ thống game đối kháng 3D 1v1 thời gian thực chạy trực tiếp trên trình duyệt, không cần cài đặt, không cần tải asset nặng và hỗ trợ triển khai 1-click lên Vercel.
 
-## 🎯 Luật chơi & Cơ chế cốt lõi
-1. **Mỗi người một mạng (1-hit 1-kill):** Trúng một viên đạn là phân định thắng bại ngay lập tức.
-2. **Cố định vị trí:** Hai người chơi đứng nấp sau 2 tảng đá tự nhiên, không thể chạy loanh quanh.
-3. **Cơ chế ngó đầu 360° bằng chuột (Continuous Mouse Peek):** 
-   - Mặc định: Giấu người an toàn 100% sau tảng đá.
-   - Di chuyển chuột theo bất kỳ hướng nào (trái, phải, ngẩng lên, góc chéo) để thò đầu ra mép tảng đá quan sát và ngắm bắn đối thủ.
-   - Càng thò đầu ra ngoài, góc nhìn càng thoáng nhưng bạn cũng để lộ sơ hở cho đối thủ bắn trúng!
-4. **Ngắm & Bắn:**
-   - **Chuột Phải:** Bật ống ngắm bắn tỉa (ADS - Zoom 6x, thu nhỏ tâm ngắm).
-   - **Chuột Trái:** Bắn đạn (Có thể bắn nhanh từ hông hoặc bắn qua ống ngắm).
-   - Chu kỳ lên đạn bolt-action chân thực kèm âm thanh metallic.
-5. **3 Cự ly bản đồ (3 Maps):**
-   - **Cự ly Gần (18m):** Phản xạ chớp nhoáng, mục tiêu lớn, đấu súng giáp lá cà tốc độ cao.
-   - **Cự ly Vừa (35m):** Cân bằng giữa ẩn nấp và ngắm tỉa chuẩn xác.
-   - **Cự ly Xa (60m):** Thử thách bắn tỉa tầm xa, mục tiêu nhỏ, đòi hỏi kiên nhẫn.
-6. **Chế độ chơi:**
-   - **Đấu Online 2 Người:** Kết nối WebRTC Peer-to-Peer (Ping siêu thấp ~15ms, tạo phòng gửi link 1-click).
-   - **Luyện tập với Bot AI:** Đấu với Bot nấp đá thông minh để luyện tay trước khi đấu bạn bè.
+Bao gồm 2 chế độ chơi song song có thể chuyển đổi linh hoạt ngay tại sảnh chờ:
 
 ---
 
-## 🚀 Triển khai lên Vercel (1-Click Deployment)
+## 🛡️ Chế độ 1: TANK DUEL (Đấu Chiến Tăng 1v1 Thực Địa)
 
-Dự án được tối ưu 100% cho Vercel:
-1. Đăng nhập vào [Vercel](https://vercel.com).
-2. Chọn **"Add New..."** -> **"Project"**.
-3. Chọn Repository `rock-duel` từ tài khoản GitHub của bạn.
-4. Bấm **"Deploy"** (Mọi cài đặt Vite/React đã được cấu hình tự động).
-5. Sau 30 giây, bạn sẽ nhận được đường link web trực tiếp để gửi cho bạn bè chơi!
+Mô phỏng điều khiển xe tăng chiến đấu chân thực với hệ thống giáp, máu, động lực học bánh xích và đường đạn pháo 120mm:
+
+1. **Điều khiển xe tăng như thật:**
+   - **Phím W / S:** Tăng tốc tiến / Lùi xe tăng (có quán tính động cơ, hộp số D, R, N).
+   - **Phím A / D:** Đánh lái xoay thân xe (Pivot turn / quay tại chỗ).
+   - Bánh xích và bánh chịu tải xoay động theo tốc độ di chuyển thực tế.
+2. **Hệ thống ngắm bắn tháp pháo 360°:**
+   - Lia chuột để xoay tháp pháo độc lập với hướng di chuyển của thân xe.
+   - Nòng pháo nâng hạ góc bắn (Elevation / Depression).
+   - **Chuột Phải:** Bật kính ngắm quang học pháo thủ (ADS 6x) với thước ngắm mil-dot đo khoảng cách.
+   - **Chuột Trái:** Bắn pháo 120mm APFSDS có độ rơi đường đạn (Ballistics), khói lửa đầu nòng và giật lùi nòng pháo.
+3. **Thanh Máu (Armor HP) & Vị trí hiểm yếu:**
+   - Mỗi xe có **1000 HP**.
+   - **Giáp trước (Glacis / Mantlet):** Độ nghiêng cao, giảm sát thương (khoảng ~220 HP).
+   - **Giáp hông & Tháp pháo:** Sát thương chuẩn (~320 - 340 HP).
+   - **Động cơ phía sau (Rear weakspot):** Điểm yếu chí mạng, gây nổ hầm máy (~480 HP).
+   - Khi HP về 0: Xe tăng nổ tung, tháp pháo văng khỏi thân xe kèm cột khói lửa.
+4. **Địa hình & Vật cản:**
+   - Chướng ngại vật bê tông hình răng rồng (Dragon's Teeth), tường gạch phòng thủ, tảng đá tự nhiên để nấp thân xe (hull-down).
 
 ---
 
-## 🛠️ Công nghệ sử dụng
-- **React 18 + Vite**
-- **Three.js:** Đồ họa 3D Procedural (toàn bộ khối đá, cảnh sa mạc, súng bắn tỉa được tạo bằng toán học 3D, không cần tải file 3D nặng).
-- **Web Audio API:** Tổng hợp âm thanh tiếng súng nổ, tiếng đạn nảy đá, tiếng lên đạn trực tiếp từ code JS.
-- **PeerJS (WebRTC):** Kết nối P2P thời gian thực giữa 2 trình duyệt mà không cần máy chủ WebSocket đắt tiền.
-- **Tailwind CSS + Lucide Icons**
+## 🪨 Chế độ 2: ROCK DUEL (Đấu Súng 1v1 Nấp Đá)
+
+Game đấu súng bắn tỉa 1-hit 1-kill giấu mình sau tảng đá tự nhiên:
+1. **Cố định vị trí sau đá:** Không thể di chuyển lung tung, tập trung hoàn toàn vào phản xạ ngắm tỉa.
+2. **Cơ chế ngó đầu (Lean/Peek):**
+   - Phím **A / D:** Thò người sang trái / phải mép đá.
+   - Phím **W / S:** Nhổm cao lên ngó qua gờ đá hoặc thụt sâu xuống nấp.
+3. **Bắn tỉa 1-hit 1-kill:**
+   - Bắn trúng đầu hoặc thân là phân định thắng bại ngay lập tức.
+   - Lên đạn bolt-action chân thực.
+
+---
+
+## ⚡ Công nghệ nổi bật
+- **100% Procedural 3D (Three.js):** Toàn bộ mô hình xe tăng, súng, đá, sa mạc được dựng bằng thuật toán hình học toán học, tải trang trong chưa đầy 1 giây!
+- **Web Audio API:** Âm thanh pháo tăng gầm rú, tiếng kim loại va đập, nổ tung, nạp đạn được tổng hợp trực tiếp từ code JS.
+- **Real-Time Multiplayer (MQTT WebSocket + Reliable ACK Protocol):** Đồng bộ mạng 20Hz siêu mượt, đảm bảo 100% không rớt gói tin phân định thắng bại.
+- **Bot AI thông minh:** Cả 2 chế độ đều hỗ trợ luyện tập với Bot AI trước khi rủ bạn bè vào giao đấu.
