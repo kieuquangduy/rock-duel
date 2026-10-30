@@ -1,0 +1,33 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  body, html {
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background-color: #0c0a09;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  }
+}
+
+/* Custom crosshairs and animations */
+.scope-vignette {
+  background: radial-gradient(circle at center, transparent 35%, rgba(0, 0, 0, 0.85) 60%, rgba(0, 0, 0, 0.98) 85%);
+}
+
+.scope-ring {
+  box-shadow: 0 0 0 2000px rgba(0, 0, 0, 0.96);
+}
+
+/* Hide scrollbars */
+::-webkit-scrollbar {
+  display: none;
+}
