@@ -1,42 +1,47 @@
 import * as THREE from 'three';
 
 /**
- * Creates a rugged tactical cover boulder.
- * Mathematically guaranteed to block line of sight when crouching neutral:
- * - Base sits firmly on ground (Y = 0)
- * - Center top reaches Y = 1.42m (higher than camera eye level 1.10m)
- * - Width spans -1.25m to +1.25m (2.5m wide)
- * - Deep faceted low-poly stone aesthetic
+ * Creates a natural tactical cover boulder.
+ * Specifically crafted for cover-shooting mechanics:
+ * - Sits firmly on ground (Y = 0)
+ * - Has an organic arched crest/ridge at center height Y = 1.28m
+ * - Width: 2.3m (spans X = -1.15m to +1.15m)
+ * - Tapered ridge at the top (Z depth ~0.5m) so peeking over the top gives an unobstructed view!
  */
 export function createProceduralRock(seed = 1) {
-  // Use Cylinder or Box base subdivided for solid coverage
-  const geometry = new THREE.CylinderGeometry(1.05, 1.35, 1.45, 16, 6);
+  // Use a Sphere or Hemisphere base deformed into a rugged rock
+  const geometry = new THREE.SphereGeometry(1.2, 18, 14);
   const pos = geometry.attributes.position;
   const v = new THREE.Vector3();
 
   const pseudoNoise = (x, y, z) => {
-    return Math.sin(x * 2.8 + seed) * Math.cos(y * 2.2 + seed * 1.4) * Math.sin(z * 3.1 + seed * 2.1);
+    return Math.sin(x * 3.2 + seed) * Math.cos(y * 2.8 + seed * 1.5) * Math.sin(z * 3.5 + seed * 2.1);
   };
 
   for (let i = 0; i < pos.count; i++) {
     v.fromBufferAttribute(pos, i);
 
-    // Shift geometry so base sits at Y = 0
-    v.y += 1.45 / 2;
+    // Shift so base sits at ground (Y = 0)
+    v.y += 1.2;
+
+    // Scale dimensions:
+    // Width X: 2.3m
+    v.x *= 1.15;
+    // Height Y: 1.28m in center
+    v.y *= 0.55;
+    // Depth Z: 0.7m (slender depth so you don't look across a flat plateau!)
+    v.z *= 0.42;
 
     // Organic displacement
-    const noise = 0.12 * pseudoNoise(v.x, v.y, v.z);
-    v.x += noise;
-    v.z += noise;
+    const displacement = 0.08 * pseudoNoise(v.x, v.y, v.z);
+    v.x += displacement;
+    v.y += displacement;
+    v.z += displacement;
 
-    // Guarantee: Do NOT lower the center top ridge!
-    // Center top must stay at least 1.40m to conceal player's camera at 1.10m
-    if (v.y > 1.3) {
-      v.y = Math.max(1.40, v.y + noise * 0.5);
+    // Flatten ground contact
+    if (v.y < 0.05) {
+      v.y = 0;
     }
-
-    // Widen horizontally slightly for broader shoulder cover
-    v.x *= 1.2;
 
     pos.setXYZ(i, v.x, v.y, v.z);
   }
@@ -44,7 +49,7 @@ export function createProceduralRock(seed = 1) {
   geometry.computeVertexNormals();
 
   const rockMaterial = new THREE.MeshStandardMaterial({
-    color: 0x825336, // Earthy desert sandstone
+    color: 0x825336, // Warm sandstone
     roughness: 0.92,
     metalness: 0.05,
     flatShading: true,
@@ -68,14 +73,14 @@ export function createOpponentAvatar() {
   const metalMat = new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.2, metalness: 0.9 });
 
   // 1. Torso
-  const torso = new THREE.Mesh(new THREE.BoxGeometry(0.65, 0.7, 0.38), darkClothMat);
-  torso.position.y = 0.75;
+  const torso = new THREE.Mesh(new THREE.BoxGeometry(0.65, 0.65, 0.35), darkClothMat);
+  torso.position.y = 0.65;
   torso.castShadow = true;
   group.add(torso);
 
   // 2. Head Group
   const headGroup = new THREE.Group();
-  headGroup.position.set(0, 1.35, 0);
+  headGroup.position.set(0, 1.20, 0);
 
   const head = new THREE.Mesh(new THREE.SphereGeometry(0.22, 14, 14), skinMat);
   head.castShadow = true;
@@ -86,7 +91,7 @@ export function createOpponentAvatar() {
     new THREE.SphereGeometry(0.24, 14, 14, 0, Math.PI * 2, 0, Math.PI * 0.55),
     helmetMat
   );
-  helmet.position.y = 0.05;
+  helmet.position.y = 0.04;
   headGroup.add(helmet);
 
   // Cyan Visor
@@ -103,7 +108,7 @@ export function createOpponentAvatar() {
 
   // 3. Opponent Sniper Rifle
   const rifleGroup = new THREE.Group();
-  rifleGroup.position.set(0.22, 1.1, 0.25);
+  rifleGroup.position.set(0.22, 1.0, 0.25);
 
   const rifleBody = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.12, 0.75), metalMat);
   const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 1.0, 8), metalMat);
