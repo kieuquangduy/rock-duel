@@ -19,9 +19,7 @@ export default function App() {
 
   // In-game real-time HUD states
   const [isAiming, setIsAiming] = useState(false);
-  const [isCovered, setIsCovered] = useState(true);
   const [canShoot, setCanShoot] = useState(true);
-  const [peekOffset, setPeekOffset] = useState({ x: 0, y: 0 });
   const [muted, setMuted] = useState(false);
 
   // Round victory/defeat notification
@@ -31,9 +29,10 @@ export default function App() {
   // Multiplayer Lobby states
   const [roomId, setRoomId] = useState('');
   const [isWaitingForPeer, setIsWaitingForPeer] = useState(false);
+  const [networkStatus, setNetworkStatus] = useState('');
   const [networkError, setNetworkError] = useState('');
 
-  // Auto-detect room parameter from URL (?room=DUEL-XXXX)
+  // Auto-detect room parameter from URL (?room=duelxxxx)
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const roomParam = params.get('room');
@@ -42,7 +41,7 @@ export default function App() {
     }
   }, []);
 
-  // Sync loop: send continuous peek & aim to remote player at 60Hz
+  // Sync loop: send continuous lean & aim to remote player at 60Hz
   useEffect(() => {
     if (!inGame || isBotMode || !networkRef.current) return;
 
@@ -51,7 +50,6 @@ export default function App() {
         const offset = engineRef.current.peekOffset;
         const aiming = engineRef.current.isAiming;
 
-        setPeekOffset({ x: offset.x, y: offset.y });
         setIsAiming(aiming);
 
         networkRef.current.send({
@@ -72,6 +70,7 @@ export default function App() {
     setInGame(true);
     setScores({ player: 0, opponent: 0 });
     setRoundStatus(null);
+    setIsWaitingForPeer(false);
 
     setTimeout(() => {
       if (!containerRef.current) return;
@@ -83,9 +82,6 @@ export default function App() {
       engineRef.current = new GameEngine(containerRef.current, {
         mapDistance: distance,
         isBotMode: botMode,
-        onCoverChange: (covered) => {
-          setIsCovered(covered);
-        },
         onBoltState: (ready) => {
           setCanShoot(ready);
         },
@@ -107,7 +103,23 @@ export default function App() {
     }, 50);
   };
 
-  // When local player scores a kill
+  // Exit Match and return to Lobby
+  const handleExitMatch = () => {
+    if (engineRef.current) {
+      engineRef.current.destroy();
+      engineRef.current = null;
+    }
+    if (networkRef.current) {
+      networkRef.current.destroy();
+      networkRef.current = null;
+    }
+    setInGame(false);
+    setIsWaitingForPeer(false);
+    setRoomId('');
+    setNetworkStatus('');
+    setNetworkError('');
+  };
+
   const handleRoundWon = (killInfo) => {
     setRoundStatus('WIN');
     const msg = killInfo.isHeadshot
@@ -116,11 +128,11 @@ export default function App() {
     setRoundMessage(msg);
 
     setScores((prev) => {
-      const newPlayerScore = prev.player + 1;
-      if (newPlayerScore >= 3) {
+      const newScore = prev.player + 1;
+      if (newScore >= 3) {
         confetti({ particleCount: 100, spread: 70, origin: { y: 0.6 } });
       }
-      return { ...prev, player: newPlayerScore };
+      return { ...prev, player: newScore };
     });
 
     if (!isBotMode && networkRef.current) {
@@ -131,23 +143,19 @@ export default function App() {
       });
     }
 
-    // Auto next round after 2.8s
     setTimeout(() => {
       nextRound();
-    }, 2800);
+    }, 2600);
   };
 
-  // When local player gets hit
   const handleRoundLost = (hitInfo) => {
     setRoundStatus('LOSS');
     setRoundMessage(`${hitInfo.killer || 'Đối thủ'} đã hạ gục bạn!`);
-
     setScores((prev) => ({ ...prev, opponent: prev.opponent + 1 }));
 
-    // Auto next round after 2.8s
     setTimeout(() => {
       nextRound();
-    }, 2800);
+    }, 2600);
   };
 
   const nextRound = () => {
@@ -166,15 +174,15 @@ export default function App() {
     setIsWaitingForPeer(true);
 
     const net = new MultiplayerManager({
+      onStatus: (msg) => setNetworkStatus(msg),
       onConnected: () => {
-        setIsWaitingForPeer(false);
-        // Both players start game on current map distance
+        // As host, when peer connects, broadcast START_GAME and enter immediately
         net.send({ type: 'START_GAME', distance: mapDistance });
         startGame(false, mapDistance);
       },
       onDisconnected: () => {
         setNetworkError('Bạn bè đã ngắt kết nối!');
-        setInGame(false);
+        handleExitMatch();
       },
       onData: (data) => {
         handleNetworkData(data);
@@ -190,7 +198,7 @@ export default function App() {
       const id = await net.createRoom();
       setRoomId(id);
     } catch (err) {
-      setNetworkError('Không thể tạo phòng. Vui lòng thử lại!');
+      setNetworkError('Không thể tạo phòng. Thử lại sau!');
       setIsWaitingForPeer(false);
     }
   };
@@ -201,12 +209,13 @@ export default function App() {
     setIsWaitingForPeer(true);
 
     const net = new MultiplayerManager({
+      onStatus: (msg) => setNetworkStatus(msg),
       onConnected: () => {
-        setIsWaitingForPeer(false);
+        setNetworkStatus('Đã kết nối! Đang đồng bộ vào trận...');
       },
       onDisconnected: () => {
         setNetworkError('Mất kết nối với chủ phòng!');
-        setInGame(false);
+        handleExitMatch();
       },
       onData: (data) => {
         handleNetworkData(data);
@@ -227,14 +236,32 @@ export default function App() {
     }
   };
 
-  // Receive network packets from peer
   const handleNetworkData = (data) => {
     if (!data) return;
 
     switch (data.type) {
+      case 'CLIENT_HELLO':
+        // Host receives client greeting -> fire START_GAME
+        if (networkRef.current?.isHost) {
+          networkRef.current.send({ type: 'START_GAME', distance: mapDistance });
+          if (!inGame) {
+            startGame(false, mapDistance);
+          }
+        }
+        break;
+
       case 'START_GAME':
         setMapDistance(data.distance);
         startGame(false, data.distance);
+        if (networkRef.current) {
+          networkRef.current.send({ type: 'START_ACK' });
+        }
+        break;
+
+      case 'START_ACK':
+        if (!inGame) {
+          startGame(false, mapDistance);
+        }
         break;
 
       case 'PEEK':
@@ -250,7 +277,6 @@ export default function App() {
         break;
 
       case 'HIT':
-        // Opponent says they hit us
         if (engineRef.current && engineRef.current.isAlive) {
           engineRef.current.isAlive = false;
           sounds.playDefeat();
@@ -284,17 +310,15 @@ export default function App() {
       {inGame && (
         <HUD
           isAiming={isAiming}
-          isCovered={isCovered}
           canShoot={canShoot}
-          peekOffset={peekOffset}
           scores={scores}
           mapDistance={mapDistance}
           roundStatus={roundStatus}
           roundMessage={roundMessage}
-          isHost={networkRef.current?.isHost}
           isBotMode={isBotMode}
           muted={muted}
           onToggleMute={handleToggleMute}
+          onExitMatch={handleExitMatch}
         />
       )}
 
@@ -313,6 +337,7 @@ export default function App() {
           }}
           roomId={roomId}
           isWaitingForPeer={isWaitingForPeer}
+          networkStatus={networkStatus}
           error={networkError}
         />
       )}

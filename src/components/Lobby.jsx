@@ -9,11 +9,12 @@ export function Lobby({
   onSelectMap,
   roomId,
   isWaitingForPeer,
+  networkStatus,
   error,
 }) {
   const [inputRoomId, setInputRoomId] = useState('');
   const [copied, setCopied] = useState(false);
-  const [activeTab, setActiveTab] = useState('online'); // 'online' or 'bot'
+  const [activeTab, setActiveTab] = useState('online');
 
   const maps = [
     {
@@ -56,7 +57,7 @@ export function Lobby({
             ROCK DUEL
           </h1>
           <p className="text-stone-400 text-xs sm:text-sm mt-1">
-            Mỗi người 1 mạng • Di chuột để ngó đầu ra khỏi đá • Bắn hạ đối thủ
+            Di chuột để ngó đầu ra khỏi tảng đá • Chĩa súng ngắm bắn đối thủ
           </p>
         </div>
 
@@ -116,7 +117,7 @@ export function Lobby({
         {/* Tab Content: Online Mode */}
         {activeTab === 'online' && (
           <div className="flex flex-col gap-4">
-            {/* Host room section */}
+            {/* Host room button */}
             {!roomId && (
               <div className="flex flex-col sm:flex-row gap-3">
                 <button
@@ -128,13 +129,13 @@ export function Lobby({
               </div>
             )}
 
-            {/* Waiting for friend state */}
+            {/* Waiting for friend / Connection state */}
             {roomId && isWaitingForPeer && (
               <div className="p-4 bg-stone-950/80 border border-amber-500/40 rounded-2xl flex flex-col gap-3">
                 <div className="flex items-center justify-between">
                   <div>
                     <div className="text-[10px] uppercase tracking-wider text-stone-400 font-bold">
-                      Mã Phòng Của Bạn:
+                      Mã Phòng:
                     </div>
                     <div className="text-2xl font-black text-amber-300 font-mono tracking-widest">
                       {roomId}
@@ -142,7 +143,9 @@ export function Lobby({
                   </div>
                   <div className="flex items-center gap-2">
                     <span className="w-2.5 h-2.5 rounded-full bg-amber-400 animate-ping" />
-                    <span className="text-xs text-stone-400 font-medium">Đang chờ bạn...</span>
+                    <span className="text-xs text-stone-400 font-medium">
+                      {networkStatus || 'Đang đợi bạn kết nối...'}
+                    </span>
                   </div>
                 </div>
 
@@ -166,9 +169,9 @@ export function Lobby({
                   <input
                     type="text"
                     value={inputRoomId}
-                    onChange={(e) => setInputRoomId(e.target.value.toUpperCase())}
-                    placeholder="VD: DUEL-9X2K"
-                    className="flex-1 px-4 py-2.5 bg-stone-950 border border-stone-800 rounded-xl text-stone-200 text-sm uppercase font-mono tracking-wider focus:outline-none focus:border-amber-500"
+                    onChange={(e) => setInputRoomId(e.target.value.toLowerCase())}
+                    placeholder="VD: duel4k8b"
+                    className="flex-1 px-4 py-2.5 bg-stone-950 border border-stone-800 rounded-xl text-stone-200 text-sm font-mono tracking-wider focus:outline-none focus:border-amber-500"
                   />
                   <button
                     onClick={() => onJoinRoom(inputRoomId)}
@@ -193,7 +196,7 @@ export function Lobby({
         {activeTab === 'bot' && (
           <div className="flex flex-col gap-4">
             <div className="p-4 bg-stone-950/60 rounded-2xl border border-stone-800 text-xs text-stone-400 leading-relaxed">
-              Bạn sẽ đấu với <b>Bot Tinh Anh</b> nấp sau tảng đá đối diện. Bot sẽ liên tục đổi góc ngó và nhắm bắn khi bạn thò đầu ra. Thích hợp để làm quen và luyện ngắm bắn trước khi đấu với bạn bè!
+              Bạn sẽ đấu với <b>Bot Tinh Anh</b> nấp sau tảng đá đối diện. Bot sẽ thò đầu ra các góc (trái, phải, ngẩng lên) kèm vệt sáng ống ngắm vàng để bạn phát hiện và ngắm bắn!
             </div>
             <button
               onClick={onStartSolo}
@@ -208,11 +211,11 @@ export function Lobby({
         <div className="pt-3 border-t border-stone-800/80 flex flex-wrap items-center justify-between text-[11px] text-stone-400 gap-2">
           <div className="flex items-center gap-1.5">
             <Compass size={13} className="text-amber-400" />
-            <span>Di chuột: Ngó đầu bất kỳ hướng</span>
+            <span>Di chuột: Ngó đầu ra & Chĩa súng vào địch</span>
           </div>
           <div className="flex items-center gap-1.5">
             <Target size={13} className="text-amber-400" />
-            <span>Chuột phải: Ngắm ADS</span>
+            <span>Chuột phải: Bật kính ngắm ADS</span>
           </div>
           <div className="flex items-center gap-1.5">
             <Shield size={13} className="text-amber-400" />

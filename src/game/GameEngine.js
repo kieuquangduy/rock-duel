@@ -11,7 +11,7 @@ export class GameEngine {
     this.onCoverChange = options.onCoverChange || (() => {});
     this.onBoltState = options.onBoltState || (() => {});
 
-    this.mapDistance = options.mapDistance || 35; // 18 (Near), 35 (Mid), 60 (Far)
+    this.mapDistance = options.mapDistance || 35; // 18, 35, 60
     this.isBotMode = options.isBotMode ?? true;
 
     // Game state
@@ -20,11 +20,16 @@ export class GameEngine {
     this.isAiming = false;
     this.canShoot = true;
     this.isCovered = true;
-    
-    // Continuous Mouse Peek Offset (-1.5 to +1.5 horizontally, -0.6 to +1.2 vertically)
+
+    // Aim angles (Pitch & Yaw)
+    this.aimYaw = 0;   // Radians (left/right)
+    this.aimPitch = 0; // Radians (up/down)
+
+    // Dynamic Peek Offset (Lean) calculated from aim & mouse
     this.peekOffset = { x: 0, y: 0 };
-    this.targetPeek = { x: 0, y: 0 };
-    this.mouseSensitivity = 0.0035;
+    this.targetLean = { x: 0, y: 0 };
+
+    this.mouseSensitivity = 0.0022;
 
     // View recoil & sway
     this.recoil = { pitch: 0, yaw: 0 };
@@ -34,17 +39,17 @@ export class GameEngine {
     this.raycaster = new THREE.Raycaster();
     this.clock = new THREE.Clock();
 
-    // Active visual effects (bullet tracers, sparks)
+    // Active visual effects
     this.tracers = [];
     this.sparks = [];
 
     // Bot AI state
     this.botState = {
-      action: 'HIDE', // HIDE, PEEK, AIM, SHOT
-      timer: 1.5,
-      peekTarget: { x: 0, y: 0 },
+      action: 'HIDE', // HIDE, PEEK
+      timer: 1.2,
+      targetPos: { x: 0, y: 0 },
       aimDuration: 0,
-      reactionTime: 0.65, // seconds before bot fires when player is exposed
+      reactionTime: 0.9,
     };
 
     this.initScene();
@@ -54,65 +59,56 @@ export class GameEngine {
 
   initScene() {
     // 1. Renderer
-    this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+    this.renderer = new THREE.WebGLRenderer({ antialias: true });
     this.renderer.setSize(this.container.clientWidth, this.container.clientHeight);
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.1;
+    this.renderer.toneMappingExposure = 1.15;
     this.container.appendChild(this.renderer.domElement);
 
     // 2. Scene
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color(0xd9b48f); // Warm desert haze
-    this.scene.fog = new THREE.FogExp2(0xd9b48f, 0.012);
+    this.scene.background = new THREE.Color(0xd9b38c);
+    this.scene.fog = new THREE.FogExp2(0xd9b38c, 0.008);
 
     // 3. Camera
     this.camera = new THREE.PerspectiveCamera(
-      75,
+      70,
       this.container.clientWidth / this.container.clientHeight,
       0.1,
-      500
+      400
     );
-    this.baseCamPos = new THREE.Vector3(0, 1.45, 0); // Behind player's rock
+    this.baseCamPos = new THREE.Vector3(0, 1.25, 0);
     this.camera.position.copy(this.baseCamPos);
 
     // 4. Lighting
-    const ambientLight = new THREE.AmbientLight(0xffecd2, 0.7);
+    const ambientLight = new THREE.AmbientLight(0xfff0dd, 0.75);
     this.scene.add(ambientLight);
 
-    const sunLight = new THREE.DirectionalLight(0xfff5e6, 1.8);
-    sunLight.position.set(40, 60, 30);
-    sunLight.castShadow = true;
-    sunLight.shadow.mapSize.width = 2048;
-    sunLight.shadow.mapSize.height = 2048;
-    sunLight.shadow.camera.near = 10;
-    sunLight.shadow.camera.far = 150;
-    const d = 50;
-    sunLight.shadow.camera.left = -d;
-    sunLight.shadow.camera.right = d;
-    sunLight.shadow.camera.top = d;
-    sunLight.shadow.camera.bottom = -d;
-    this.scene.add(sunLight);
+    const sun = new THREE.DirectionalLight(0xfffaed, 1.9);
+    sun.position.set(25, 45, 20);
+    sun.castShadow = true;
+    sun.shadow.mapSize.width = 2048;
+    sun.shadow.mapSize.height = 2048;
+    this.scene.add(sun);
 
     // 5. Arena Environment
-    this.environment = createDesertEnvironment(this.scene, this.mapDistance);
+    this.environment = createDesertEnvironment(this.scene);
 
-    // 6. Player's Rock (Positioned at Z = -1.8, directly sheltering player)
-    this.playerRock = createProceduralRock(3.8, 3.1, 2.6, 42);
-    this.playerRock.position.set(0, 1.1, -1.8);
+    // 6. Player's Rock (Width 2.4m, Height 1.38m, placed at z = -1.25)
+    this.playerRock = createProceduralRock(2.4, 1.38, 1.8, 42);
+    this.playerRock.position.set(0, 0.65, -1.25);
     this.scene.add(this.playerRock);
 
     // 7. Opponent's Rock & Opponent Avatar
-    this.opponentRock = createProceduralRock(3.8, 3.1, 2.6, 99);
-    this.opponentRock.position.set(0, 1.1, -this.mapDistance);
+    this.opponentRock = createProceduralRock(2.4, 1.38, 1.8, 99);
+    this.opponentRock.position.set(0, 0.65, -this.mapDistance);
     this.scene.add(this.opponentRock);
 
     this.opponent = createOpponentAvatar();
-    this.opponent.group.position.set(0, 0, -this.mapDistance + 0.35);
-    // Face towards the player
-    this.opponent.group.rotation.y = 0;
+    this.opponent.group.position.set(0, 0, -this.mapDistance + 0.3);
     this.scene.add(this.opponent.group);
 
     // 8. First-person Gun Model attached to camera
@@ -121,18 +117,17 @@ export class GameEngine {
     this.scene.add(this.camera);
 
     // 9. Muzzle flash light
-    this.muzzleLight = new THREE.PointLight(0xffaa22, 0, 8);
-    this.muzzleLight.position.set(0.3, -0.2, -1.8);
+    this.muzzleLight = new THREE.PointLight(0xffaa22, 0, 7);
+    this.muzzleLight.position.set(0.28, -0.15, -1.5);
     this.camera.add(this.muzzleLight);
   }
 
   setMapDistance(distance) {
     this.mapDistance = distance;
     this.opponentRock.position.z = -this.mapDistance;
-    this.opponent.group.position.z = -this.mapDistance + 0.35;
+    this.opponent.group.position.z = -this.mapDistance + 0.3;
   }
 
-  // Pointer lock & Mouse handling
   initListeners() {
     this.onMouseMove = (e) => {
       if (!this.isAlive) return;
@@ -140,31 +135,33 @@ export class GameEngine {
       const deltaX = e.movementX || 0;
       const deltaY = e.movementY || 0;
 
-      // Sensitivity factor (reduced when ADS aiming for precision)
       const sens = this.isAiming ? this.mouseSensitivity * 0.45 : this.mouseSensitivity;
 
-      // Shift target peek offset continuously in any direction
-      this.targetPeek.x += deltaX * sens;
-      this.targetPeek.y -= deltaY * sens; // Invert Y so moving mouse up leans up
+      // Update aim angles
+      this.aimYaw -= deltaX * sens;
+      this.aimPitch -= deltaY * sens;
 
-      // Clamp continuous peek boundary (ellipse around rock)
-      const maxHorizontal = 1.65;
-      const maxUp = 1.05;
-      const maxDown = -0.45;
+      // Limit yaw & pitch range
+      this.aimYaw = THREE.MathUtils.clamp(this.aimYaw, -0.65, 0.65);
+      this.aimPitch = THREE.MathUtils.clamp(this.aimPitch, -0.35, 0.45);
 
-      this.targetPeek.x = THREE.MathUtils.clamp(this.targetPeek.x, -maxHorizontal, maxHorizontal);
-      this.targetPeek.y = THREE.MathUtils.clamp(this.targetPeek.y, maxDown, maxUp);
+      // Leaning / Peeking out around the boulder:
+      // When aiming left -> lean body left to clear the rock!
+      // When aiming right -> lean body right to clear the rock!
+      // When aiming up -> raise head above the rock!
+      // When aiming down / center -> duck safely behind the rock!
+      this.targetLean.x = this.aimYaw * 2.2;
+      this.targetLean.y = this.aimPitch * 1.4;
     };
 
     this.onMouseDown = (e) => {
-      // Audio resume on first user interaction
       sounds.init();
 
-      // Right-click: Aim down sights (ADS)
+      // Right-click: Aim Down Sights (ADS)
       if (e.button === 2) {
         this.setAiming(true);
       }
-      // Left-click: Fire bullet!
+      // Left-click: Shoot!
       else if (e.button === 0) {
         this.shoot();
       }
@@ -177,7 +174,7 @@ export class GameEngine {
     };
 
     this.onContextMenu = (e) => {
-      e.preventDefault(); // Prevent browser right-click context menu
+      e.preventDefault();
     };
 
     this.onResize = () => {
@@ -201,22 +198,20 @@ export class GameEngine {
     this.isAiming = aiming;
   }
 
-  // Shoot weapon
   shoot() {
     if (!this.isAlive || !this.canShoot) return;
 
     this.canShoot = false;
-    this.onBoltState(false); // Reloading bolt
+    this.onBoltState(false);
 
-    // 1. Play sound
+    // 1. Audio
     sounds.playGunshot(false);
 
-    // 2. Recoil kick
-    this.recoil.pitch += this.isAiming ? 0.08 : 0.14;
-    this.recoil.yaw += (Math.random() - 0.5) * 0.04;
+    // 2. Gun recoil
+    this.recoil.pitch += this.isAiming ? 0.05 : 0.09;
     if (this.fpsGun) {
-      this.fpsGun.position.z += 0.18; // Kick back
-      this.fpsGun.rotation.x += 0.12;
+      this.fpsGun.position.z += 0.16;
+      this.fpsGun.rotation.x += 0.1;
     }
 
     // 3. Muzzle flash
@@ -225,37 +220,33 @@ export class GameEngine {
       if (this.muzzleLight) this.muzzleLight.intensity = 0;
     }, 45);
 
-    // 4. Hit Detection via Raycasting
-    // Origin is camera position, direction is straight ahead with slight recoil
-    const rayDir = new THREE.Vector3(0, 0, -1);
-    rayDir.applyQuaternion(this.camera.quaternion);
+    // 4. Raycast hit check from camera direction
+    const rayDir = new THREE.Vector3();
+    this.camera.getWorldDirection(rayDir);
 
-    // Apply minor hipfire spread if not aiming
+    // Spread if hipfiring
     if (!this.isAiming) {
-      rayDir.x += (Math.random() - 0.5) * 0.025;
-      rayDir.y += (Math.random() - 0.5) * 0.025;
+      rayDir.x += (Math.random() - 0.5) * 0.02;
+      rayDir.y += (Math.random() - 0.5) * 0.02;
       rayDir.normalize();
     }
 
     this.raycaster.set(this.camera.position, rayDir);
 
-    // Check hit against: Player's Rock (blocked?), Opponent's Rock, Opponent's Head/Body
     const targets = [
       this.playerRock,
       this.opponentRock,
       this.opponent.headMesh,
-      this.opponent.torsoMesh
+      this.opponent.torsoMesh,
     ];
 
     const intersects = this.raycaster.intersectObjects(targets, false);
 
     let endPoint = this.camera.position.clone().add(rayDir.clone().multiplyScalar(this.mapDistance + 10));
-    let hitSomething = false;
 
     if (intersects.length > 0) {
       const hit = intersects[0];
       endPoint = hit.point;
-      hitSomething = true;
 
       // Hit our own rock?
       if (hit.object === this.playerRock) {
@@ -267,43 +258,40 @@ export class GameEngine {
         sounds.playRicochet();
         this.spawnSparks(hit.point, hit.face ? hit.face.normal : new THREE.Vector3(0, 0, 1));
       }
-      // Hit opponent (Headshot or Body)!
+      // Hit opponent!
       else if (hit.object === this.opponent.headMesh || hit.object === this.opponent.torsoMesh) {
         const isHead = hit.object === this.opponent.headMesh;
         sounds.playHitmarker();
-        this.spawnSparks(hit.point, new THREE.Vector3(0, 0, 1), 0xff2222); // Red hit spark
+        this.spawnSparks(hit.point, new THREE.Vector3(0, 0, 1), 0xff2222);
 
         this.onKill({ isHeadshot: isHead, distance: Math.round(this.mapDistance) });
         this.opponentAlive = false;
         sounds.playVictory();
-
-        // Animate opponent falling
         this.animateOpponentFall();
       }
     }
 
-    // Spawn bullet tracer
-    this.spawnTracer(this.camera.position.clone().add(new THREE.Vector3(0.2, -0.2, -0.5)), endPoint);
+    // Bullet tracer
+    this.spawnTracer(this.camera.position.clone().add(new THREE.Vector3(0.18, -0.15, -0.4)), endPoint);
 
     // Notify multiplayer listener
     this.onShotFired({
       origin: this.camera.position.toArray(),
       direction: rayDir.toArray(),
-      hitPoint: endPoint.toArray()
+      hitPoint: endPoint.toArray(),
     });
 
-    // 5. Bolt action reload cycle (~1.1s)
+    // Bolt reload
     setTimeout(() => {
       sounds.playBoltCycle();
     }, 350);
 
     setTimeout(() => {
       this.canShoot = true;
-      this.onBoltState(true); // Ready to fire again!
+      this.onBoltState(true);
     }, 1100);
   }
 
-  // Remote/Opponent fired weapon
   onRemoteShot(shotData) {
     sounds.playGunshot(true);
 
@@ -312,31 +300,25 @@ export class GameEngine {
 
     this.spawnTracer(origin, endPoint);
 
-    // Check if the remote shot hits our exposed player!
     if (this.isAlive) {
-      // Test if local player is exposed and ray is close to player head
       const rayDir = new THREE.Vector3(...shotData.direction).normalize();
-      const distToPlayer = origin.distanceTo(this.camera.position);
-      const closestPointOnRay = origin.clone().add(rayDir.clone().multiplyScalar(distToPlayer));
-      
-      const headDist = closestPointOnRay.distanceTo(this.camera.position);
+      const dist = origin.distanceTo(this.camera.position);
+      const closestPoint = origin.clone().add(rayDir.clone().multiplyScalar(dist));
+      const headDist = closestPoint.distanceTo(this.camera.position);
 
-      // If we are not covered and ray passes within 0.35m of head
-      if (!this.isCovered && headDist < 0.38) {
+      if (!this.isCovered && headDist < 0.45) {
         this.isAlive = false;
         sounds.playDefeat();
-        this.onHit({ killer: 'Opponent' });
+        this.onHit({ killer: 'Đối thủ' });
       }
     }
   }
 
-  // Spawn visual bullet tracer
   spawnTracer(start, end) {
     const material = new THREE.LineBasicMaterial({
-      color: 0xffe680,
-      linewidth: 2,
+      color: 0xffea75,
       transparent: true,
-      opacity: 0.9,
+      opacity: 0.95,
     });
     const geometry = new THREE.BufferGeometry().setFromPoints([start, start.clone()]);
     const line = new THREE.Line(geometry, material);
@@ -347,11 +329,10 @@ export class GameEngine {
       start,
       end,
       progress: 0,
-      speed: 18.0, // fast bullet streak
+      speed: 20.0,
     });
   }
 
-  // Spawn spark burst on rock impact
   spawnSparks(point, normal, color = 0xffbf00) {
     const count = 12;
     const sparkGeo = new THREE.BufferGeometry();
@@ -364,16 +345,16 @@ export class GameEngine {
       positions[i * 3 + 2] = point.z;
 
       const vel = normal.clone().multiplyScalar(2 + Math.random() * 3);
-      vel.x += (Math.random() - 0.5) * 3;
+      vel.x += (Math.random() - 0.5) * 2.5;
       vel.y += Math.random() * 2.5;
-      vel.z += (Math.random() - 0.5) * 3;
+      vel.z += (Math.random() - 0.5) * 2.5;
       velocities.push(vel);
     }
 
     sparkGeo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
     const mat = new THREE.PointsMaterial({
       color,
-      size: 0.15,
+      size: 0.14,
       transparent: true,
       opacity: 1,
     });
@@ -386,86 +367,87 @@ export class GameEngine {
 
   animateOpponentFall() {
     if (!this.opponent) return;
-    // Tumble backward
     const startTime = performance.now();
     const animate = () => {
       const elapsed = (performance.now() - startTime) / 1000;
       if (elapsed < 0.6) {
         this.opponent.group.rotation.x = -elapsed * 2.2;
-        this.opponent.group.position.y = -elapsed * 0.8;
+        this.opponent.group.position.y = -elapsed * 0.9;
         requestAnimationFrame(animate);
       }
     };
     animate();
   }
 
-  // Sync remote player's peek and aim
   syncRemotePlayer(remoteState) {
     if (!this.opponent || !this.opponentAlive) return;
 
-    // remoteState: { peekX, peekY, isAiming }
-    const peekX = -remoteState.peekX; // Mirror horizontal for opposing perspective
+    // Invert X for opponent perspective
+    const peekX = -remoteState.peekX;
     const peekY = remoteState.peekY;
 
-    // Move opponent's head and rifle
     this.opponent.headGroup.position.x = peekX;
-    this.opponent.headGroup.position.y = 1.5 + peekY;
+    this.opponent.headGroup.position.y = 1.42 + peekY;
 
-    this.opponent.torsoMesh.position.x = peekX * 0.65;
-    this.opponent.torsoMesh.position.y = 0.85 + peekY * 0.65;
+    this.opponent.torsoMesh.position.x = peekX * 0.7;
+    this.opponent.torsoMesh.position.y = 0.8 + peekY * 0.7;
 
     this.opponent.rifleGroup.position.x = peekX + 0.22;
-    this.opponent.rifleGroup.position.y = 1.25 + peekY;
+    this.opponent.rifleGroup.position.y = 1.15 + peekY;
+
+    // Scope glint when aiming
+    if (this.opponent.glintMesh) {
+      this.opponent.glintMesh.visible = !!remoteState.isAiming;
+    }
   }
 
-  // Update Bot AI (Solo Practice Mode)
   updateBot(delta) {
     if (!this.isBotMode || !this.opponentAlive || !this.isAlive) return;
 
     this.botState.timer -= delta;
 
     if (this.botState.action === 'HIDE') {
-      // Return to safety behind rock
-      this.botState.peekTarget = { x: 0, y: -0.3 };
+      this.botState.targetPos = { x: 0, y: -0.3 };
+      if (this.opponent.glintMesh) this.opponent.glintMesh.visible = false;
+
       if (this.botState.timer <= 0) {
-        // Choose random peek direction around rock
-        const directions = [
-          { x: 1.15, y: 0.1 },  // Peek right
-          { x: -1.15, y: 0.1 }, // Peek left
-          { x: 0, y: 0.95 },    // Peek over top
-          { x: 0.9, y: 0.8 },   // Peek top-right
-          { x: -0.9, y: 0.8 },  // Peek top-left
+        // Pick a distinct peek direction
+        const choices = [
+          { x: -1.3, y: 0.15 }, // Peek Left past the rock
+          { x: 1.3, y: 0.15 },  // Peek Right past the rock
+          { x: 0, y: 0.45 },    // Peek Over the top of the rock
+          { x: -0.9, y: 0.4 },  // Peek Top-Left
+          { x: 0.9, y: 0.4 },   // Peek Top-Right
         ];
-        this.botState.peekTarget = directions[Math.floor(Math.random() * directions.length)];
+        this.botState.targetPos = choices[Math.floor(Math.random() * choices.length)];
         this.botState.action = 'PEEK';
-        this.botState.timer = 1.2 + Math.random() * 1.5;
+        this.botState.timer = 2.2 + Math.random() * 1.2; // Stay visible long enough to be spotted!
         this.botState.aimDuration = 0;
       }
     } else if (this.botState.action === 'PEEK') {
+      if (this.opponent.glintMesh) this.opponent.glintMesh.visible = true;
+
       // If player is exposed, bot starts tracking
       if (!this.isCovered) {
         this.botState.aimDuration += delta;
         if (this.botState.aimDuration >= this.botState.reactionTime) {
-          // Bot fires!
           this.botShoot();
           this.botState.action = 'HIDE';
-          this.botState.timer = 1.5 + Math.random() * 1.0;
+          this.botState.timer = 1.6 + Math.random() * 1.0;
         }
       } else {
-        // Player hidden, bot peeks around then hides
         if (this.botState.timer <= 0) {
           this.botState.action = 'HIDE';
-          this.botState.timer = 1.0 + Math.random() * 1.8;
+          this.botState.timer = 1.2 + Math.random() * 1.2;
         }
       }
     }
 
-    // Smoothly interpolate bot avatar to target
     const currentX = this.opponent.headGroup.position.x;
-    const currentY = this.opponent.headGroup.position.y - 1.5;
+    const currentY = this.opponent.headGroup.position.y - 1.42;
 
-    const newX = THREE.MathUtils.lerp(currentX, this.botState.peekTarget.x, delta * 7);
-    const newY = THREE.MathUtils.lerp(currentY, this.botState.peekTarget.y, delta * 7);
+    const newX = THREE.MathUtils.lerp(currentX, this.botState.targetPos.x, delta * 6);
+    const newY = THREE.MathUtils.lerp(currentY, this.botState.targetPos.y, delta * 6);
 
     this.syncRemotePlayer({
       peekX: -newX,
@@ -475,23 +457,20 @@ export class GameEngine {
   }
 
   botShoot() {
-    // Sound & Tracer from bot
     const botOrigin = this.opponent.group.position.clone().add(new THREE.Vector3(
       this.opponent.headGroup.position.x + 0.2,
       1.3 + this.opponent.headGroup.position.y,
       0.8
     ));
 
-    // Bot shoots at player
     let hitPlayer = false;
-    // 70% accuracy when player is out in open
-    if (!this.isCovered && Math.random() < 0.75) {
+    if (!this.isCovered && Math.random() < 0.8) {
       hitPlayer = true;
     }
 
     const endPoint = hitPlayer
       ? this.camera.position.clone()
-      : this.camera.position.clone().add(new THREE.Vector3((Math.random() - 0.5) * 1.5, (Math.random() - 0.5) * 1.5, 0));
+      : this.camera.position.clone().add(new THREE.Vector3((Math.random() - 0.5) * 1.6, (Math.random() - 0.5) * 1.6, 0));
 
     sounds.playGunshot(true);
     this.spawnTracer(botOrigin, endPoint);
@@ -506,64 +485,61 @@ export class GameEngine {
     }
   }
 
-  // Main animation frame loop
   startLoop() {
     const tick = () => {
       this.animationFrameId = requestAnimationFrame(tick);
       const delta = Math.min(this.clock.getDelta(), 0.1);
       this.swayTime += delta;
 
-      // 1. Smoothly interpolate local player's continuous peek offset
-      this.peekOffset.x = THREE.MathUtils.lerp(this.peekOffset.x, this.targetPeek.x, delta * 12);
-      this.peekOffset.y = THREE.MathUtils.lerp(this.peekOffset.y, this.targetPeek.y, delta * 12);
+      // 1. Smoothly interpolate lean offset
+      this.peekOffset.x = THREE.MathUtils.lerp(this.peekOffset.x, this.targetLean.x, delta * 14);
+      this.peekOffset.y = THREE.MathUtils.lerp(this.peekOffset.y, this.targetLean.y, delta * 14);
 
-      // 2. Camera position based on peek
-      this.camera.position.x = this.baseCamPos.x + this.peekOffset.x;
-      this.camera.position.y = this.baseCamPos.y + this.peekOffset.y;
-      this.camera.position.z = this.baseCamPos.z;
+      // 2. Camera position based on lean
+      // Ducked base height: 1.18m (behind rock).
+      // Leaning up raises to 1.60m (over rock).
+      // Leaning left/right shifts x by up to 1.4m (past rock edge).
+      this.camera.position.x = this.peekOffset.x;
+      this.camera.position.y = 1.18 + Math.max(0, this.peekOffset.y);
+      this.camera.position.z = 0;
 
-      // 3. Smooth FOV zoom for ADS
-      const targetFOV = this.isAiming ? 32 : 75;
-      this.camera.fov = THREE.MathUtils.lerp(this.camera.fov, targetFOV, delta * 14);
+      // 3. Camera Rotation = Aiming angles + recoil
+      this.recoil.pitch = THREE.MathUtils.lerp(this.recoil.pitch, 0, delta * 12);
+      this.camera.rotation.order = 'YXZ';
+      this.camera.rotation.y = this.aimYaw;
+      this.camera.rotation.x = this.aimPitch + this.recoil.pitch;
+
+      // 4. Smooth FOV for ADS
+      const targetFOV = this.isAiming ? 28 : 70;
+      this.camera.fov = THREE.MathUtils.lerp(this.camera.fov, targetFOV, delta * 15);
       this.camera.updateProjectionMatrix();
 
-      // 4. Recover from recoil
-      this.recoil.pitch = THREE.MathUtils.lerp(this.recoil.pitch, 0, delta * 10);
-      this.recoil.yaw = THREE.MathUtils.lerp(this.recoil.yaw, 0, delta * 10);
-
-      // 5. Look at opponent rock with recoil & breathing sway
-      const lookTarget = new THREE.Vector3(0, 1.45, -this.mapDistance);
-      this.camera.lookAt(lookTarget);
-      this.camera.rotation.x += this.recoil.pitch;
-      this.camera.rotation.y += this.recoil.yaw;
-
-      // 6. First person gun sway and ADS alignment
+      // 5. First-person Gun alignment
       if (this.fpsGun) {
-        const swayX = Math.sin(this.swayTime * 2) * (this.isAiming ? 0.002 : 0.008);
-        const swayY = Math.cos(this.swayTime * 4) * (this.isAiming ? 0.002 : 0.008);
+        const swayX = Math.sin(this.swayTime * 2.5) * (this.isAiming ? 0.001 : 0.005);
+        const swayY = Math.cos(this.swayTime * 5.0) * (this.isAiming ? 0.001 : 0.005);
 
-        // Position: hipfire vs ADS alignment
         const targetGunPos = this.isAiming
-          ? new THREE.Vector3(0, -0.165, -0.45) // Centered scope view
-          : new THREE.Vector3(0.32, -0.32, -0.6); // Hipfire lower-right
+          ? new THREE.Vector3(0, -0.145, -0.42) // Centered scope
+          : new THREE.Vector3(0.28, -0.28, -0.55); // Hip position
 
-        this.fpsGun.position.lerp(targetGunPos, delta * 15);
+        this.fpsGun.position.lerp(targetGunPos, delta * 16);
         this.fpsGun.position.x += swayX;
         this.fpsGun.position.y += swayY;
         this.fpsGun.rotation.x = THREE.MathUtils.lerp(this.fpsGun.rotation.x, 0, delta * 12);
       }
 
-      // 7. Check if player's head is behind cover or exposed!
-      // Rock width is ~3.8, height is ~3.1
-      // Safe zone is roughly |x| < 0.75 and y < 0.45
-      const isExposed = Math.abs(this.peekOffset.x) > 0.78 || this.peekOffset.y > 0.48;
+      // 6. Cover detection:
+      // Rock half-width: ~1.15m. Rock height: ~1.35m.
+      // If camera |x| > 1.1m (leaned out to side) OR camera y > 1.36m (peeking over top), player is EXPOSED!
+      const isExposed = Math.abs(this.camera.position.x) > 1.05 || this.camera.position.y > 1.35;
       const newCoverState = !isExposed;
       if (newCoverState !== this.isCovered) {
         this.isCovered = newCoverState;
         this.onCoverChange(this.isCovered);
       }
 
-      // 8. Update bullet tracers
+      // 7. Update bullet tracers
       for (let i = this.tracers.length - 1; i >= 0; i--) {
         const t = this.tracers[i];
         t.progress += delta * t.speed;
@@ -573,13 +549,13 @@ export class GameEngine {
           t.line.material.dispose();
           this.tracers.splice(i, 1);
         } else {
-          const currentHead = t.start.clone().lerp(t.end, Math.min(1.0, t.progress * 1.8));
-          const currentTail = t.start.clone().lerp(t.end, Math.max(0.0, t.progress * 1.8 - 0.4));
+          const currentHead = t.start.clone().lerp(t.end, Math.min(1.0, t.progress * 1.6));
+          const currentTail = t.start.clone().lerp(t.end, Math.max(0.0, t.progress * 1.6 - 0.4));
           t.line.geometry.setFromPoints([currentTail, currentHead]);
         }
       }
 
-      // 9. Update spark particles
+      // 8. Update sparks
       for (let i = this.sparks.length - 1; i >= 0; i--) {
         const s = this.sparks[i];
         s.life -= delta;
@@ -597,29 +573,25 @@ export class GameEngine {
               pos.getY(j) + s.velocities[j].y * delta,
               pos.getZ(j) + s.velocities[j].z * delta
             );
-            s.velocities[j].y -= 9.8 * delta; // gravity
+            s.velocities[j].y -= 9.8 * delta;
           }
           pos.needsUpdate = true;
           s.particles.material.opacity = s.life / 0.35;
         }
       }
 
-      // 10. Update Bot AI
+      // 9. Update Bot AI
       this.updateBot(delta);
 
-      // Render frame
       this.renderer.render(this.scene, this.camera);
     };
 
     tick();
   }
 
-  // Reset round for rematch
   resetRound() {
     this.isAlive = true;
     this.opponentAlive = true;
-    this.targetPeek = { x: 0, y: 0 };
-    this.peekOffset = { x: 0, y: 0 };
     this.canShoot = true;
     this.isAiming = false;
     this.onBoltState(true);
@@ -627,13 +599,13 @@ export class GameEngine {
     if (this.opponent) {
       this.opponent.group.rotation.x = 0;
       this.opponent.group.position.y = 0;
-      this.opponent.headGroup.position.set(0, 1.5, 0);
-      this.opponent.torsoMesh.position.set(0, 0.85, 0);
+      this.opponent.headGroup.position.set(0, 1.42, 0);
+      this.opponent.torsoMesh.position.set(0, 0.8, 0);
     }
 
     if (this.isBotMode) {
       this.botState.action = 'HIDE';
-      this.botState.timer = 1.5;
+      this.botState.timer = 1.2;
     }
   }
 
