@@ -57,21 +57,21 @@ export function createProceduralTank(isOpponent = false) {
 
   // Sloped Front Glacis Plate
   const glacis = new THREE.Mesh(new THREE.BoxGeometry(2.58, 0.5, 1.2), armorMat);
-  glacis.position.set(0, 0.9, 1.8);
-  glacis.rotation.x = -Math.PI / 6;
+  glacis.position.set(0, 0.9, -1.8);
+  glacis.rotation.x = Math.PI / 6;
   glacis.castShadow = true;
   hullGroup.add(glacis);
 
   // Rear Engine Deck
   const engineDeck = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.25, 1.5), darkArmorMat);
-  engineDeck.position.set(0, 1.15, -1.3);
+  engineDeck.position.set(0, 1.15, 1.3);
   engineDeck.castShadow = true;
   hullGroup.add(engineDeck);
 
   // Exhaust vents
   const exhaustL = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 0.5, 8), wheelMat);
   exhaustL.rotation.x = Math.PI / 2;
-  exhaustL.position.set(-0.9, 1.05, -2.25);
+  exhaustL.position.set(-0.9, 1.05, 2.25);
   hullGroup.add(exhaustL);
 
   const exhaustR = exhaustL.clone();
@@ -80,6 +80,8 @@ export function createProceduralTank(isOpponent = false) {
 
   // 2. TRACKS & WHEELS (Left & Right)
   const wheels = [];
+  const hitboxes = [mainHull, glacis, engineDeck];
+
   const createTrackAssembly = (sideX) => {
     const trackGroup = new THREE.Group();
     trackGroup.position.x = sideX;
@@ -88,13 +90,17 @@ export function createProceduralTank(isOpponent = false) {
     const trackBelt = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.65, 4.8), treadMat);
     trackBelt.position.y = 0.45;
     trackBelt.castShadow = true;
+    trackBelt.userData = { part: 'HULL_SIDE', tankGroup: root };
     trackGroup.add(trackBelt);
+    hitboxes.push(trackBelt);
 
     // Side armor skirt plate
     const skirt = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.6, 4.6), armorMat);
     skirt.position.set(sideX > 0 ? 0.32 : -0.32, 0.55, 0);
     skirt.castShadow = true;
+    skirt.userData = { part: 'HULL_SIDE', tankGroup: root };
     trackGroup.add(skirt);
+    hitboxes.push(skirt);
 
     // 5 Road wheels per side
     for (let i = 0; i < 5; i++) {
@@ -110,13 +116,13 @@ export function createProceduralTank(isOpponent = false) {
     // Drive sprocket (rear) & Idler (front)
     const sprocket = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.28, 0.45, 10), wheelMat);
     sprocket.rotation.z = Math.PI / 2;
-    sprocket.position.set(0, 0.62, -2.15);
+    sprocket.position.set(0, 0.62, 2.15);
     trackGroup.add(sprocket);
     wheels.push(sprocket);
 
     const idler = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.28, 0.45, 10), wheelMat);
     idler.rotation.z = Math.PI / 2;
-    idler.position.set(0, 0.62, 2.15);
+    idler.position.set(0, 0.62, -2.15);
     trackGroup.add(idler);
     wheels.push(idler);
 
@@ -129,7 +135,7 @@ export function createProceduralTank(isOpponent = false) {
   // Front Headlights
   const headlightMat = new THREE.MeshBasicMaterial({ color: isOpponent ? 0xff4444 : 0xffffaa });
   const lightL = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.12, 0.1), headlightMat);
-  lightL.position.set(-0.95, 1.05, 2.2);
+  lightL.position.set(-0.95, 1.05, -2.2);
   hullGroup.add(lightL);
 
   const lightR = lightL.clone();
@@ -138,7 +144,7 @@ export function createProceduralTank(isOpponent = false) {
 
   // 3. TURRET GROUP (Rotates 360° around Y)
   const turretGroup = new THREE.Group();
-  turretGroup.position.set(0, 1.25, 0.1);
+  turretGroup.position.set(0, 1.25, -0.1);
   hullGroup.add(turretGroup);
 
   // Turret Ring Base
@@ -148,36 +154,36 @@ export function createProceduralTank(isOpponent = false) {
 
   // Turret Main Body (Angular modern MBT design)
   const turretBody = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.65, 2.5), armorMat);
-  turretBody.position.set(0, 0.45, -0.15);
+  turretBody.position.set(0, 0.45, 0.15);
   turretBody.castShadow = true;
   turretGroup.add(turretBody);
 
   // Turret Angled Cheeks (Front Armor Wedges)
   const cheekL = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.6, 1.4), armorMat);
-  cheekL.position.set(-0.95, 0.45, 0.4);
-  cheekL.rotation.y = -Math.PI / 10;
+  cheekL.position.set(-0.95, 0.45, -0.4);
+  cheekL.rotation.y = Math.PI / 10;
   cheekL.castShadow = true;
   turretGroup.add(cheekL);
 
   const cheekR = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.6, 1.4), armorMat);
-  cheekR.position.set(0.95, 0.45, 0.4);
-  cheekR.rotation.y = Math.PI / 10;
+  cheekR.position.set(0.95, 0.45, -0.4);
+  cheekR.rotation.y = -Math.PI / 10;
   cheekR.castShadow = true;
   turretGroup.add(cheekR);
 
   // Commander Cupola & Hatch
   const cupola = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.32, 0.25, 10), darkArmorMat);
-  cupola.position.set(0.5, 0.85, -0.3);
+  cupola.position.set(0.5, 0.85, 0.3);
   turretGroup.add(cupola);
 
   // Antenna
   const antenna = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.02, 1.6, 4), wheelMat);
-  antenna.position.set(-0.7, 1.55, -1.0);
+  antenna.position.set(-0.7, 1.55, 1.0);
   turretGroup.add(antenna);
 
   // 4. CANNON BARREL GROUP (Pivots Pitch up/down)
   const barrelGroup = new THREE.Group();
-  barrelGroup.position.set(0, 0.45, 1.15);
+  barrelGroup.position.set(0, 0.45, -1.15);
   turretGroup.add(barrelGroup);
 
   // Gun Mantlet
@@ -188,31 +194,31 @@ export function createProceduralTank(isOpponent = false) {
   // Long 120mm Gun Barrel
   const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.11, 4.2, 12), wheelMat);
   barrel.rotation.x = Math.PI / 2;
-  barrel.position.set(0, 0, 2.1);
+  barrel.position.set(0, 0, -2.1);
   barrel.castShadow = true;
   barrelGroup.add(barrel);
 
   // Bore Evacuator / Fume Extractor collar
   const fumeExtractor = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.14, 0.65, 12), armorMat);
   fumeExtractor.rotation.x = Math.PI / 2;
-  fumeExtractor.position.set(0, 0, 2.5);
+  fumeExtractor.position.set(0, 0, -2.5);
   barrelGroup.add(fumeExtractor);
 
   // Double-Baffle Muzzle Brake
   const muzzleBrake = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.2, 0.45), wheelMat);
-  muzzleBrake.position.set(0, 0, 4.3);
+  muzzleBrake.position.set(0, 0, -4.3);
   barrelGroup.add(muzzleBrake);
 
   // Muzzle Flash Light & Mesh (Glows when fired)
   const muzzleLight = new THREE.PointLight(0xff7700, 0, 20);
-  muzzleLight.position.set(0, 0, 4.8);
+  muzzleLight.position.set(0, 0, -4.8);
   barrelGroup.add(muzzleLight);
 
   const muzzleFlash = new THREE.Mesh(
     new THREE.DodecahedronGeometry(0.55),
     new THREE.MeshBasicMaterial({ color: 0xffea55, transparent: true, opacity: 0 })
   );
-  muzzleFlash.position.set(0, 0, 4.8);
+  muzzleFlash.position.set(0, 0, -4.8);
   barrelGroup.add(muzzleFlash);
 
   // 5. HITBOXES FOR ARMOR DAMAGE
@@ -221,6 +227,10 @@ export function createProceduralTank(isOpponent = false) {
   engineDeck.userData = { part: 'REAR_WEAKSPOT', tankGroup: root };
   turretBody.userData = { part: 'TURRET', tankGroup: root };
   mantlet.userData = { part: 'MANTLET', tankGroup: root };
+  cheekL.userData = { part: 'TURRET', tankGroup: root };
+  cheekR.userData = { part: 'TURRET', tankGroup: root };
+
+  hitboxes.push(turretBody, mantlet, cheekL, cheekR);
 
   return {
     root,
@@ -235,6 +245,7 @@ export function createProceduralTank(isOpponent = false) {
     engineDeck,
     turretBody,
     mantlet,
+    hitboxes,
   };
 }
 

@@ -47,29 +47,31 @@ export class TankGameEngine {
 
     // Calculate initial spawn positions based on Host / Client roles
     // Host / Player starts at South base (Z = +36), Client starts at North base (Z = -36)
+    // Facing towards opponent: from South (Z=+36) facing North (Z=-36) is facing direction 0 (towards -Z)
     const isSouthSpawn = this.isHost;
     const startZ = isSouthSpawn ? 36 : -36;
     const oppStartZ = isSouthSpawn ? -36 : 36;
-    const startFacing = isSouthSpawn ? 0 : Math.PI; // Facing towards opponent
+    const startFacing = isSouthSpawn ? 0 : Math.PI;
 
     this.playerTankState = {
       pos: new THREE.Vector3(0, 0, startZ),
       hullRotY: startFacing,
       speed: 0,
-      maxForwardSpeed: 13.5, // m/s (~48 km/h)
-      maxReverseSpeed: 6.5,  // m/s (~23 km/h)
-      accel: 14.0,
-      brake: 22.0,
+      maxForwardSpeed: 14.0, // m/s (~50 km/h)
+      maxReverseSpeed: 7.0,  // m/s (~25 km/h)
+      accel: 15.0,
+      brake: 24.0,
       turnSpeed: 1.85,       // rad/s
       turretYaw: startFacing,
       targetTurretYaw: startFacing,
       cannonPitch: 0,
+      targetCannonPitch: 0,
     };
 
-    // Camera angles
+    // Camera angles (yaw and pitch)
     this.camYaw = startFacing;
-    this.camPitch = 0.20;
-    this.mouseSensitivity = 0.0024;
+    this.camPitch = 0.08;
+    this.mouseSensitivity = 0.0022;
 
     // Opponent Remote State for Interpolation
     this.opponentRemoteState = {
@@ -84,6 +86,7 @@ export class TankGameEngine {
     this.shells = [];
     this.effects = [];
     this.scorchMarks = [];
+    this.currentAimPoint = null;
 
     // Bot AI state
     this.botState = {
@@ -146,14 +149,17 @@ export class TankGameEngine {
     // Player Tank (Desert Tan Camo)
     this.playerTank = createProceduralTank(false);
     this.playerTank.root.position.copy(this.playerTankState.pos);
-    this.playerTank.root.rotation.y = this.playerTankState.hullRotY;
+    this.playerTank.root.rotation.set(0, this.playerTankState.hullRotY, 0);
     this.scene.add(this.playerTank.root);
 
     // Opponent Tank (Urban Steel Gray Camo)
     this.opponentTank = createProceduralTank(true);
     this.opponentTank.root.position.copy(this.opponentRemoteState.pos);
-    this.opponentTank.root.rotation.y = this.opponentRemoteState.hullRotY;
+    this.opponentTank.root.rotation.set(0, this.opponentRemoteState.hullRotY, 0);
     this.scene.add(this.opponentTank.root);
+
+    // Pre-align camera so frame 1 has valid raycasting
+    this.updateCamera(0.016);
   }
 
   requestLock() {
@@ -213,10 +219,8 @@ export class TankGameEngine {
 
       const sens = this.isAiming ? this.mouseSensitivity * 0.35 : this.mouseSensitivity;
       this.camYaw -= dx * sens;
-      this.camPitch = THREE.MathUtils.clamp(this.camPitch - dy * sens, -0.15, 0.7);
-
-      this.playerTankState.targetTurretYaw = this.camYaw;
-      this.playerTankState.cannonPitch = THREE.MathUtils.clamp(-this.camPitch * 0.45, -0.12, 0.3);
+      // Moving mouse up (dy < 0) increases pitch (aim up), down decreases pitch (aim down)
+      this.camPitch = THREE.MathUtils.clamp(this.camPitch - dy * sens, -0.28, 0.55);
     };
 
     this.onMouseDown = (e) => {
@@ -269,6 +273,28 @@ export class TankGameEngine {
     this.onAimState(this.isAiming);
   }
 
+  /**
+   * Raycast from the center of the screen (crosshair) into 3D world space
+   * Returns the exact 3D point the player is aiming at.
+   */
+  getTargetAimPoint() {
+    this.raycaster.setFromCamera(new THREE.Vector2(0, 0), this.camera);
+
+    const candidates = [
+      this.battlefield.ground,
+      ...this.battlefield.obstacles.map((o) => o.mesh),
+      ...(this.opponentTank?.hitboxes || []),
+    ];
+
+    const hits = this.raycaster.intersectObjects(candidates, false);
+    if (hits.length > 0) {
+      return hits[0].point;
+    }
+    return this.raycaster.ray.origin
+      .clone()
+      .add(this.raycaster.ray.direction.clone().multiplyScalar(150));
+  }
+
   shootPlayerCannon() {
     if (!this.isAlive || !this.canShoot || !this.opponentAlive) return;
 
@@ -279,28 +305,28 @@ export class TankGameEngine {
     sounds.playTankCannon(false);
     this.addCameraTrauma(0.5);
 
-    // Muzzle flash animation
+    // Muzzle flash animation at the barrel tip
     this.triggerMuzzleFlash(this.playerTank);
 
-    // Hull recoil kick
-    this.playerTankState.speed -= 2.2;
-    this.playerTank.barrelGroup.position.z -= 0.35;
+    // Hull recoil kick (recoil backward)
+    this.playerTankState.speed -= 2.0;
 
-    // Shell spawn from barrel tip
+    // Barrel mechanical recoil kick (recoils backward in local +Z)
+    this.playerTank.barrelGroup.position.z += 0.35;
+
+    // Spawn shell from the tip of the barrel (muzzleFlash position)
     const spawnPos = new THREE.Vector3();
-    this.playerTank.barrelGroup.getWorldPosition(spawnPos);
-    const barrelDir = new THREE.Vector3(0, 0, 1)
-      .applyAxisAngle(new THREE.Vector3(1, 0, 0), this.playerTankState.cannonPitch)
-      .applyAxisAngle(new THREE.Vector3(0, 1, 0), this.playerTankState.turretYaw)
-      .normalize();
+    this.playerTank.muzzleFlash.getWorldPosition(spawnPos);
 
-    spawnPos.add(barrelDir.clone().multiplyScalar(4.5));
+    // Target convergence: shell flies directly from muzzle towards the crosshair's 3D aim point
+    const aimTarget = this.currentAimPoint || this.getTargetAimPoint();
+    const fireDir = aimTarget.clone().sub(spawnPos).normalize();
 
-    this.spawnShell(spawnPos, barrelDir, 95, true);
+    this.spawnShell(spawnPos, fireDir, 120, true);
 
     this.onShotFired({
       origin: spawnPos.toArray(),
-      direction: barrelDir.toArray(),
+      direction: fireDir.toArray(),
     });
 
     // Start reload countdown
@@ -320,7 +346,7 @@ export class TankGameEngine {
 
   triggerMuzzleFlash(tankModel) {
     if (!tankModel.muzzleLight || !tankModel.muzzleFlash) return;
-    tankModel.muzzleLight.intensity = 18;
+    tankModel.muzzleLight.intensity = 20;
     tankModel.muzzleFlash.material.opacity = 0.95;
     tankModel.muzzleFlash.scale.set(1.6, 1.6, 2.8);
 
@@ -334,30 +360,35 @@ export class TankGameEngine {
   }
 
   spawnShell(pos, dir, speed, isLocalPlayer) {
-    const geo = new THREE.CylinderGeometry(0.09, 0.09, 0.8, 8);
-    const mat = new THREE.MeshBasicMaterial({ color: 0xfff066 });
+    const geo = new THREE.CylinderGeometry(0.08, 0.08, 0.8, 8);
+    const mat = new THREE.MeshBasicMaterial({ color: isLocalPlayer ? 0xfff066 : 0xff4433 });
     const mesh = new THREE.Mesh(geo, mat);
     mesh.position.copy(pos);
     mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
     this.scene.add(mesh);
 
+    // Dynamic projectile glow tracer
+    const light = new THREE.PointLight(isLocalPlayer ? 0xffaa22 : 0xff3311, 2.5, 9);
+    mesh.add(light);
+
     this.shells.push({
       mesh,
       pos: pos.clone(),
       velocity: dir.clone().multiplyScalar(speed),
-      gravity: -3.5,
+      gravity: -2.0,
       isLocalPlayer,
-      life: 4.0,
+      life: 3.5,
     });
   }
 
   onRemoteShot(shotData) {
     sounds.playTankCannon(true);
     this.triggerMuzzleFlash(this.opponentTank);
+    this.opponentTank.barrelGroup.position.z += 0.35;
 
     const origin = new THREE.Vector3(...shotData.origin);
     const dir = new THREE.Vector3(...shotData.direction);
-    this.spawnShell(origin, dir, 95, false);
+    this.spawnShell(origin, dir, 120, false);
   }
 
   syncRemoteTank(remoteState) {
@@ -382,6 +413,7 @@ export class TankGameEngine {
     this.onOpponentHpChange(this.opponentHp, this.maxHp);
 
     sounds.playTankHit(true);
+    sounds.playHitmarker();
     this.triggerExplosion(hitPoint, false);
 
     if (this.opponentHp <= 0) {
@@ -421,22 +453,13 @@ export class TankGameEngine {
     }
   }
 
-  /**
-   * MÃN NHÃN EXPLOSION EFFECT:
-   * - Expanding bright fireball
-   * - Expanding ground shockwave ring
-   * - Billowing smoke clouds
-   * - High-velocity fiery sparks
-   * - Ground blast crater scorch mark
-   * - Camera trauma shake
-   */
   triggerExplosion(point, isDestruction = false) {
     const scaleMult = isDestruction ? 2.5 : 1.2;
 
     // 1. Screen Trauma based on distance
     const distToPlayer = point.distanceTo(this.playerTankState.pos);
     if (distToPlayer < 50) {
-      const shakeFactor = Math.max(0.2, (1 - distToPlayer / 50)) * (isDestruction ? 1.0 : 0.6);
+      const shakeFactor = Math.max(0.2, 1 - distToPlayer / 50) * (isDestruction ? 1.0 : 0.6);
       this.addCameraTrauma(shakeFactor);
     }
 
@@ -464,7 +487,7 @@ export class TankGameEngine {
     ringMesh.position.set(point.x, 0.08, point.z);
     this.scene.add(ringMesh);
 
-    // 4. Ground Scorch Crater Decal (Persistent charred blast mark)
+    // 4. Ground Scorch Crater Decal
     const craterGeo = new THREE.CircleGeometry(isDestruction ? 3.6 : 1.8, 16);
     const craterMat = new THREE.MeshBasicMaterial({
       color: 0x181410,
@@ -575,12 +598,6 @@ export class TankGameEngine {
     anim();
   }
 
-  /**
-   * Precise Collision Detection:
-   * - Arena Boundary: circular boundary
-   * - Rocks / Dragon's Teeth: circle-circle distance
-   * - Walls: distance from point to line-segment (no oversized invisible bubbles!)
-   */
   checkCollision(pos) {
     const tankRadius = 1.9;
 
@@ -642,14 +659,13 @@ export class TankGameEngine {
       }
     }
 
-    // 3. Move along hull facing vector
-    // Facing direction: (0, 0, -1) rotated by hullRotY
+    // 3. Move along hull facing vector (forward is (0, 0, -1) rotated by hullRotY)
     const moveDir = new THREE.Vector3(0, 0, -1).applyAxisAngle(new THREE.Vector3(0, 1, 0), s.hullRotY);
     const nextPos = s.pos.clone().add(moveDir.multiplyScalar(s.speed * delta));
 
     // 4. Test collision
     if (this.checkCollision(nextPos)) {
-      s.speed *= -0.2; // Bounce back gently
+      s.speed *= -0.2; // Gentle bounce
     } else {
       s.pos.copy(nextPos);
     }
@@ -663,19 +679,39 @@ export class TankGameEngine {
       w.rotation.x += s.speed * delta * 2.5;
     }
 
-    // Barrel recoil restoration
+    // Barrel recoil restoration (resting position is -1.15 in Z)
     this.playerTank.barrelGroup.position.z = THREE.MathUtils.lerp(
       this.playerTank.barrelGroup.position.z,
-      1.15,
+      -1.15,
       delta * 12
     );
 
-    // 5. Smooth Turret Traversal towards mouse target
-    let diff = s.targetTurretYaw - s.turretYaw;
-    while (diff < -Math.PI) diff += Math.PI * 2;
-    while (diff > Math.PI) diff -= Math.PI * 2;
-    s.turretYaw += diff * Math.min(delta * 10, 1);
+    // 5. Turret & Cannon Aiming: convergence onto crosshair's 3D aim point
+    const aimPoint = this.getTargetAimPoint();
+    this.currentAimPoint = aimPoint;
 
+    const turretWorldPos = new THREE.Vector3();
+    this.playerTank.turretGroup.getWorldPosition(turretWorldPos);
+    const toAim = aimPoint.clone().sub(turretWorldPos);
+
+    // Desired world yaw for turret
+    s.targetTurretYaw = Math.atan2(-toAim.x, -toAim.z);
+
+    // Desired elevation pitch for cannon
+    const distXZ = Math.hypot(toAim.x, toAim.z);
+    const desiredPitch = Math.atan2(toAim.y, distXZ);
+    s.targetCannonPitch = THREE.MathUtils.clamp(desiredPitch, -0.15, 0.40);
+
+    // Smooth turret traversal & cannon elevation
+    let diffYaw = s.targetTurretYaw - s.turretYaw;
+    while (diffYaw < -Math.PI) diffYaw += Math.PI * 2;
+    while (diffYaw > Math.PI) diffYaw -= Math.PI * 2;
+    s.turretYaw += diffYaw * Math.min(delta * 14, 1);
+
+    let diffPitch = s.targetCannonPitch - s.cannonPitch;
+    s.cannonPitch += diffPitch * Math.min(delta * 14, 1);
+
+    // Apply rotations
     const localTurretAngle = s.turretYaw - s.hullRotY;
     this.playerTank.turretGroup.rotation.y = localTurretAngle;
     this.playerTank.barrelGroup.rotation.x = s.cannonPitch;
@@ -699,7 +735,7 @@ export class TankGameEngine {
     const distToPlayer = toPlayer.length();
 
     // Desired angle towards player
-    const angleToPlayer = Math.atan2(toPlayer.x, -toPlayer.z);
+    const angleToPlayer = Math.atan2(-toPlayer.x, -toPlayer.z);
 
     let hullDiff = angleToPlayer - oppRoot.rotation.y;
     while (hullDiff < -Math.PI) hullDiff += Math.PI * 2;
@@ -707,12 +743,12 @@ export class TankGameEngine {
     oppRoot.rotation.y += Math.sign(hullDiff) * Math.min(Math.abs(hullDiff), 1.5 * delta);
 
     let botSpeed = 0;
-    if (distToPlayer > 26) {
-      botSpeed = 8.0;
-    } else if (distToPlayer < 14) {
-      botSpeed = -4.0;
+    if (distToPlayer > 28) {
+      botSpeed = 8.5; // Approach
+    } else if (distToPlayer < 12) {
+      botSpeed = -4.5; // Back up if too close
     } else {
-      botSpeed = 3.0 * b.strafeDir;
+      botSpeed = 4.0 * b.strafeDir; // Tactical circling
     }
 
     if (b.moveTimer <= 0) {
@@ -727,30 +763,67 @@ export class TankGameEngine {
       oppRoot.position.copy(nextOppPos);
     }
 
+    // Animate bot road wheels
+    for (const w of this.opponentTank.wheels) {
+      w.rotation.x += botSpeed * delta * 2.5;
+    }
+
     // AI Turret aiming at player
-    const localAngle = angleToPlayer - oppRoot.rotation.y;
+    let localAngle = angleToPlayer - oppRoot.rotation.y;
+    while (localAngle < -Math.PI) localAngle += Math.PI * 2;
+    while (localAngle > Math.PI) localAngle -= Math.PI * 2;
+
     this.opponentTank.turretGroup.rotation.y = THREE.MathUtils.lerp(
       this.opponentTank.turretGroup.rotation.y,
       localAngle,
-      delta * 6
+      delta * 5
+    );
+
+    // AI Cannon pitch aiming at player center
+    const barrelWorldPos = new THREE.Vector3();
+    this.opponentTank.muzzleFlash.getWorldPosition(barrelWorldPos);
+    const targetPlayerPos = this.playerTankState.pos.clone().add(new THREE.Vector3(0, 1.2, 0));
+    const distXZ = Math.hypot(targetPlayerPos.x - barrelWorldPos.x, targetPlayerPos.z - barrelWorldPos.z);
+    const heightDiff = targetPlayerPos.y - barrelWorldPos.y;
+    const botCannonPitch = Math.atan2(heightDiff, distXZ);
+
+    this.opponentTank.barrelGroup.rotation.x = THREE.MathUtils.lerp(
+      this.opponentTank.barrelGroup.rotation.x,
+      botCannonPitch,
+      delta * 5
+    );
+
+    // Barrel recoil restoration for bot
+    this.opponentTank.barrelGroup.position.z = THREE.MathUtils.lerp(
+      this.opponentTank.barrelGroup.position.z,
+      -1.15,
+      delta * 12
     );
 
     // AI Shooting
-    if (b.shootTimer <= 0 && distToPlayer < 65) {
-      b.shootTimer = 3.6 + Math.random() * 1.5;
+    if (b.shootTimer <= 0 && distToPlayer < 75) {
+      b.shootTimer = 3.2 + Math.random() * 1.5;
 
       sounds.playTankCannon(true);
       this.triggerMuzzleFlash(this.opponentTank);
 
-      const barrelWorldPos = new THREE.Vector3();
-      this.opponentTank.barrelGroup.getWorldPosition(barrelWorldPos);
+      // Bot barrel recoil
+      this.opponentTank.barrelGroup.position.z += 0.35;
 
+      const fireSpawnPos = new THREE.Vector3();
+      this.opponentTank.muzzleFlash.getWorldPosition(fireSpawnPos);
+
+      // Bot aims at player with slight variance for fair gameplay
       const aimTarget = this.playerTankState.pos.clone().add(
-        new THREE.Vector3((Math.random() - 0.5) * 2.0, 0.8, (Math.random() - 0.5) * 2.0)
+        new THREE.Vector3(
+          (Math.random() - 0.5) * 1.4,
+          1.1 + (Math.random() - 0.5) * 0.6,
+          (Math.random() - 0.5) * 1.4
+        )
       );
-      const fireDir = aimTarget.sub(barrelWorldPos).normalize();
+      const fireDir = aimTarget.sub(fireSpawnPos).normalize();
 
-      this.spawnShell(barrelWorldPos, fireDir, 90, false);
+      this.spawnShell(fireSpawnPos, fireDir, 110, false);
     }
   }
 
@@ -761,20 +834,27 @@ export class TankGameEngine {
 
     // Decay trauma
     this.cameraTrauma = Math.max(0, this.cameraTrauma - delta * 2.2);
-    const shakeYaw = (Math.random() - 0.5) * this.cameraTrauma * 0.04;
-    const shakePitch = (Math.random() - 0.5) * this.cameraTrauma * 0.04;
+    const shakeYaw = (Math.random() - 0.5) * this.cameraTrauma * 0.035;
+    const shakePitch = (Math.random() - 0.5) * this.cameraTrauma * 0.035;
+
+    // Look direction of the player's view based on mouse yaw and pitch
+    const camLookDir = new THREE.Vector3(0, 0, -1)
+      .applyAxisAngle(new THREE.Vector3(1, 0, 0), this.camPitch)
+      .applyAxisAngle(new THREE.Vector3(0, 1, 0), this.camYaw)
+      .normalize();
 
     if (this.isAiming) {
       // 1. FIRST PERSON GUNNER OPTIC (ADS 6x Sniper Sight)
       const gunPos = new THREE.Vector3();
       this.playerTank.barrelGroup.getWorldPosition(gunPos);
 
-      const forward = new THREE.Vector3(0, 0, -1)
+      const opticOffset = new THREE.Vector3(-0.35, 0.35, -0.6)
         .applyAxisAngle(new THREE.Vector3(1, 0, 0), s.cannonPitch)
         .applyAxisAngle(new THREE.Vector3(0, 1, 0), s.turretYaw);
 
-      this.camera.position.copy(gunPos).add(new THREE.Vector3(0, 0.45, 0)).add(forward.clone().multiplyScalar(0.8));
-      this.camera.lookAt(this.camera.position.clone().add(forward));
+      const opticPos = gunPos.clone().add(opticOffset);
+      this.camera.position.copy(opticPos);
+      this.camera.lookAt(opticPos.clone().add(camLookDir.clone().multiplyScalar(50)));
 
       this.camera.rotation.y += shakeYaw;
       this.camera.rotation.x += shakePitch;
@@ -783,19 +863,20 @@ export class TankGameEngine {
       this.camera.updateProjectionMatrix();
     } else {
       // 2. THIRD PERSON CHASE CAM (Over the shoulder)
-      const camDist = 9.5;
-      const camHeight = 3.6;
+      const camDist = 9.2;
+      const pivot = s.pos.clone().add(new THREE.Vector3(0, 1.7, 0));
 
-      const offset = new THREE.Vector3(0, camHeight, camDist);
-      offset.applyAxisAngle(new THREE.Vector3(1, 0, 0), this.camPitch * 0.45);
-      offset.applyAxisAngle(new THREE.Vector3(0, 1, 0), this.camYaw);
+      const targetCamPos = pivot.clone()
+        .sub(camLookDir.clone().multiplyScalar(camDist))
+        .add(new THREE.Vector3(0, 0.9, 0));
 
-      const targetCamPos = s.pos.clone().add(new THREE.Vector3(0, 1.2, 0)).add(offset);
-      this.camera.position.lerp(targetCamPos, delta * 18);
+      if (targetCamPos.y < 0.6) {
+        targetCamPos.y = 0.6;
+      }
 
-      const lookTarget = s.pos.clone().add(new THREE.Vector3(0, 2.0, 0)).add(
-        new THREE.Vector3(0, 0, -8.0).applyAxisAngle(new THREE.Vector3(0, 1, 0), s.turretYaw)
-      );
+      this.camera.position.lerp(targetCamPos, delta * 20);
+
+      const lookTarget = this.camera.position.clone().add(camLookDir.clone().multiplyScalar(50));
       this.camera.lookAt(lookTarget);
 
       this.camera.rotation.y += shakeYaw;
@@ -834,21 +915,13 @@ export class TankGameEngine {
       }
 
       if (s.isLocalPlayer) {
-        targets.push(
-          this.opponentTank.glacis,
-          this.opponentTank.mainHull,
-          this.opponentTank.engineDeck,
-          this.opponentTank.turretBody,
-          this.opponentTank.mantlet
-        );
+        if (this.opponentTank?.hitboxes) {
+          targets.push(...this.opponentTank.hitboxes);
+        }
       } else {
-        targets.push(
-          this.playerTank.glacis,
-          this.playerTank.mainHull,
-          this.playerTank.engineDeck,
-          this.playerTank.turretBody,
-          this.playerTank.mantlet
-        );
+        if (this.playerTank?.hitboxes) {
+          targets.push(...this.playerTank.hitboxes);
+        }
       }
 
       const hits = this.raycaster.intersectObjects(targets, false);
@@ -898,7 +971,6 @@ export class TankGameEngine {
       const progress = 1.0 - fx.life / fx.maxLife;
 
       if (fx.life <= 0) {
-        // Dispose
         this.scene.remove(fx.fireMesh);
         fx.fireMesh.geometry.dispose();
         fx.fireMesh.material.dispose();
@@ -982,7 +1054,10 @@ export class TankGameEngine {
           lerpSpeed
         );
 
-        const localTurret = this.opponentRemoteState.turretYaw - this.opponentRemoteState.hullRotY;
+        let localTurret = this.opponentRemoteState.turretYaw - this.opponentRemoteState.hullRotY;
+        while (localTurret < -Math.PI) localTurret += Math.PI * 2;
+        while (localTurret > Math.PI) localTurret -= Math.PI * 2;
+
         this.opponentTank.turretGroup.rotation.y = THREE.MathUtils.lerp(
           this.opponentTank.turretGroup.rotation.y,
           localTurret,
@@ -992,6 +1067,16 @@ export class TankGameEngine {
           this.opponentTank.barrelGroup.rotation.x,
           this.opponentRemoteState.cannonPitch,
           lerpSpeed
+        );
+
+        for (const w of this.opponentTank.wheels) {
+          w.rotation.x += (this.opponentRemoteState.speed || 0) * delta * 2.5;
+        }
+
+        this.opponentTank.barrelGroup.position.z = THREE.MathUtils.lerp(
+          this.opponentTank.barrelGroup.position.z,
+          -1.15,
+          delta * 12
         );
       }
 
@@ -1030,26 +1115,35 @@ export class TankGameEngine {
     this.playerTankState.speed = 0;
     this.playerTankState.turretYaw = startFacing;
     this.playerTankState.targetTurretYaw = startFacing;
+    this.playerTankState.cannonPitch = 0;
+    this.playerTankState.targetCannonPitch = 0;
     this.camYaw = startFacing;
-    this.camPitch = 0.20;
+    this.camPitch = 0.08;
 
     this.playerTank.root.position.copy(this.playerTankState.pos);
-    this.playerTank.root.rotation.y = this.playerTankState.hullRotY;
-    this.playerTank.turretGroup.position.set(0, 1.25, 0.1);
+    this.playerTank.root.rotation.set(0, this.playerTankState.hullRotY, 0);
+    this.playerTank.turretGroup.position.set(0, 1.25, -0.1);
     this.playerTank.turretGroup.rotation.set(0, 0, 0);
+    this.playerTank.barrelGroup.position.set(0, 0.45, -1.15);
+    this.playerTank.barrelGroup.rotation.set(0, 0, 0);
 
     // Reset Opponent Tank to opposite base
     this.opponentRemoteState.pos.set(0, 0, oppStartZ);
     this.opponentRemoteState.hullRotY = isSouthSpawn ? Math.PI : 0;
+    this.opponentRemoteState.speed = 0;
     this.opponentRemoteState.turretYaw = isSouthSpawn ? Math.PI : 0;
+    this.opponentRemoteState.cannonPitch = 0;
 
     this.opponentTank.root.position.copy(this.opponentRemoteState.pos);
-    this.opponentTank.root.rotation.y = this.opponentRemoteState.hullRotY;
-    this.opponentTank.turretGroup.position.set(0, 1.25, 0.1);
+    this.opponentTank.root.rotation.set(0, this.opponentRemoteState.hullRotY, 0);
+    this.opponentTank.turretGroup.position.set(0, 1.25, -0.1);
     this.opponentTank.turretGroup.rotation.set(0, 0, 0);
+    this.opponentTank.barrelGroup.position.set(0, 0.45, -1.15);
+    this.opponentTank.barrelGroup.rotation.set(0, 0, 0);
 
     for (const s of this.shells) {
       this.scene.remove(s.mesh);
+      s.mesh.geometry.dispose();
     }
     this.shells = [];
   }
